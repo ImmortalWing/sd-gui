@@ -249,18 +249,16 @@ window.Settings = {
     
     // 选择SD路径
     const selectSdPath = async () => {
+      let loadingInstance = null;
       try {
         // 显示加载中
-        const loadingInstance = ElementPlus.ElLoading.service({
+        loadingInstance = ElementPlus.ElLoading.service({
           lock: true,
           text: '验证路径中...',
           background: 'rgba(0, 0, 0, 0.7)'
         });
         
         const result = await window.electron.config.setSdPath();
-        
-        // 关闭加载
-        loadingInstance.close();
         
         if (result && result.success) {
           sdPath.value = result.path;
@@ -279,6 +277,11 @@ window.Settings = {
       } catch (error) {
         console.error('设置SD路径失败:', error);
         ElementPlus.ElMessage.error('设置SD路径失败');
+      } finally {
+        // 确保加载实例关闭
+        if (loadingInstance) {
+          loadingInstance.close();
+        }
       }
     };
     
@@ -290,18 +293,16 @@ window.Settings = {
         return;
       }
       
+      let loadingInstance = null;
       try {
         // 显示加载中
-        const loadingInstance = ElementPlus.ElLoading.service({
+        loadingInstance = ElementPlus.ElLoading.service({
           lock: true,
           text: '验证SD路径中...',
           background: 'rgba(0, 0, 0, 0.7)'
         });
         
         const result = await window.electron.config.setSdPath(sdPath.value);
-        
-        // 关闭加载
-        loadingInstance.close();
         
         sdPathValid.value = result.success;
         
@@ -314,23 +315,26 @@ window.Settings = {
         console.error('验证SD路径失败:', error);
         sdPathValid.value = false;
         sdPathError.value = '验证失败: ' + error.message;
+      } finally {
+        // 确保加载实例关闭
+        if (loadingInstance) {
+          loadingInstance.close();
+        }
       }
     };
     
     // 选择模型目录
     const selectModelsPath = async () => {
+      let loadingInstance = null;
       try {
         // 显示加载中
-        const loadingInstance = ElementPlus.ElLoading.service({
+        loadingInstance = ElementPlus.ElLoading.service({
           lock: true,
           text: '设置路径中...',
           background: 'rgba(0, 0, 0, 0.7)'
         });
         
         const result = await window.electron.modelManager.configDir();
-        
-        // 关闭加载
-        loadingInstance.close();
         
         if (result && result.success) {
           modelsPath.value = result.path;
@@ -345,6 +349,11 @@ window.Settings = {
       } catch (error) {
         console.error('设置模型路径失败:', error);
         ElementPlus.ElMessage.error('设置模型路径失败');
+      } finally {
+        // 确保加载实例关闭
+        if (loadingInstance) {
+          loadingInstance.close();
+        }
       }
     };
     
@@ -365,9 +374,10 @@ window.Settings = {
     
     // 选择Python路径
     const selectPythonPath = async () => {
+      let loadingInstance = null;
       try {
         // 显示加载中
-        const loadingInstance = ElementPlus.ElLoading.service({
+        loadingInstance = ElementPlus.ElLoading.service({
           lock: true,
           text: '验证Python路径中...',
           background: 'rgba(0, 0, 0, 0.7)'
@@ -376,9 +386,6 @@ window.Settings = {
         console.log('开始选择Python路径...');
         const result = await window.electron.config.setPythonPath();
         console.log('选择Python路径结果:', result);
-        
-        // 关闭加载
-        loadingInstance.close();
         
         if (result && result.success) {
           pythonPath.value = result.path;
@@ -404,6 +411,11 @@ window.Settings = {
       } catch (error) {
         console.error('设置Python路径失败:', error);
         ElementPlus.ElMessage.error('设置Python路径失败: ' + error.message);
+      } finally {
+        // 确保加载实例关闭
+        if (loadingInstance) {
+          loadingInstance.close();
+        }
       }
     };
     
@@ -416,9 +428,10 @@ window.Settings = {
         return;
       }
       
+      let loadingInstance = null;
       try {
         // 显示加载中
-        const loadingInstance = ElementPlus.ElLoading.service({
+        loadingInstance = ElementPlus.ElLoading.service({
           lock: true,
           text: '验证Python路径中...',
           background: 'rgba(0, 0, 0, 0.7)'
@@ -427,9 +440,6 @@ window.Settings = {
         console.log('开始验证Python路径:', pythonPath.value);
         const result = await window.electron.config.setPythonPath(pythonPath.value);
         console.log('验证Python路径结果:', result);
-        
-        // 关闭加载
-        loadingInstance.close();
         
         pythonPathValid.value = result.success;
         
@@ -449,6 +459,11 @@ window.Settings = {
         pythonPathValid.value = false;
         pythonPathError.value = '验证失败: ' + error.message;
         pythonPathWarning.value = false;
+      } finally {
+        // 确保加载实例关闭
+        if (loadingInstance) {
+          loadingInstance.close();
+        }
       }
     };
     
@@ -484,16 +499,15 @@ window.Settings = {
     
     // 创建配置备份
     const backupConfig = async () => {
+      let loadingInstance = null;
       try {
-        const loadingInstance = ElementPlus.ElLoading.service({
+        loadingInstance = ElementPlus.ElLoading.service({
           lock: true,
           text: '正在创建备份...',
           background: 'rgba(0, 0, 0, 0.7)'
         });
         
         await window.electron.config.backup();
-        
-        loadingInstance.close();
         
         // 重新加载备份列表
         await loadConfigBackups();
@@ -502,6 +516,11 @@ window.Settings = {
       } catch (error) {
         console.error('创建配置备份失败:', error);
         ElementPlus.ElMessage.error('创建配置备份失败');
+      } finally {
+        // 确保加载实例关闭
+        if (loadingInstance) {
+          loadingInstance.close();
+        }
       }
     };
     
@@ -520,20 +539,26 @@ window.Settings = {
         
         if (!confirmed) return;
         
-        const loadingInstance = ElementPlus.ElLoading.service({
-          lock: true,
-          text: '正在恢复配置...',
-          background: 'rgba(0, 0, 0, 0.7)'
-        });
-        
-        await window.electron.config.restore(timestamp);
-        
-        loadingInstance.close();
-        
-        // 重新加载所有设置
-        await loadSettings();
-        
-        ElementPlus.ElMessage.success('配置恢复成功');
+        let loadingInstance = null;
+        try {
+          loadingInstance = ElementPlus.ElLoading.service({
+            lock: true,
+            text: '正在恢复配置...',
+            background: 'rgba(0, 0, 0, 0.7)'
+          });
+          
+          await window.electron.config.restore(timestamp);
+          
+          // 重新加载所有设置
+          await loadSettings();
+          
+          ElementPlus.ElMessage.success('配置恢复成功');
+        } finally {
+          // 确保加载实例关闭
+          if (loadingInstance) {
+            loadingInstance.close();
+          }
+        }
       } catch (error) {
         if (error !== 'cancel') {
           console.error('恢复配置备份失败:', error);
@@ -557,20 +582,26 @@ window.Settings = {
         
         if (!confirmed) return;
         
-        const loadingInstance = ElementPlus.ElLoading.service({
-          lock: true,
-          text: '正在删除备份...',
-          background: 'rgba(0, 0, 0, 0.7)'
-        });
-        
-        await window.electron.config.deleteBackup(timestamp);
-        
-        loadingInstance.close();
-        
-        // 重新加载备份列表
-        await loadConfigBackups();
-        
-        ElementPlus.ElMessage.success('配置备份删除成功');
+        let loadingInstance = null;
+        try {
+          loadingInstance = ElementPlus.ElLoading.service({
+            lock: true,
+            text: '正在删除备份...',
+            background: 'rgba(0, 0, 0, 0.7)'
+          });
+          
+          await window.electron.config.deleteBackup(timestamp);
+          
+          // 重新加载备份列表
+          await loadConfigBackups();
+          
+          ElementPlus.ElMessage.success('配置备份删除成功');
+        } finally {
+          // 确保加载实例关闭
+          if (loadingInstance) {
+            loadingInstance.close();
+          }
+        }
       } catch (error) {
         if (error !== 'cancel') {
           console.error('删除配置备份失败:', error);
