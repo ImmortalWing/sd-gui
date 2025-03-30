@@ -168,7 +168,7 @@ window.Home = {
       lowVram: false,
       enableXformers: true,
       autoLaunchBrowser: true,
-      customArgs: '',
+      customArgs: '--medvram --opt-split-attention',  // 添加medvram和优化参数
       model: '',
       offlineMode: true,  // 默认开启离线模式
       skipTorchCudaTest: true,  // 跳过CUDA测试
@@ -221,6 +221,21 @@ window.Home = {
       errorLogs.value += '\n------------- 新启动会话 --------------\n\n';
       
       try {
+        // 先检查路径是否存在
+        try {
+          const pathCheckResult = await window.electron.config.setSdPath(sdPath.value);
+          if (!pathCheckResult.success) {
+            ElMessage.error(`SD路径无效: ${pathCheckResult.error || '请检查路径是否存在'}`);
+            isLoading.value = false;
+            return;
+          }
+        } catch (pathError) {
+          console.error('检查SD路径失败:', pathError);
+          ElMessage.error(`检查SD路径失败: ${pathError.message}`);
+          isLoading.value = false;
+          return;
+        }
+        
         // 创建一个简单的纯对象，避免传递复杂的响应式对象
         const options = {
           sdPath: sdPath.value, // 确保传递sdPath
@@ -236,19 +251,38 @@ window.Home = {
           noDownloadModels: launchOptions.noDownloadModels
         };
         
+        console.log('启动选项:', options);
+        
         // 使用sdLauncher.launch发送纯对象
         const result = await window.electron.sdLauncher.launch(options);
         
-        if (result.success) {
+        if (result && result.success) {
           ElMessage.success('正在启动Stable Diffusion服务');
           isRunning.value = true;
           port.value = launchOptions.port;
         } else {
-          ElMessage.error(`启动失败: ${result.error}`);
+          // 显示更详细的错误信息
+          const errorMessage = result && result.error ? result.error : '未知错误';
+          console.error('启动失败:', errorMessage);
+          ElMessage.error(`启动失败: ${errorMessage}`);
+          
+          // 如果有特定的错误，给出建议
+          if (errorMessage.includes('CUDA') || errorMessage.includes('显存')) {
+            ElMessage.warning('提示: 尝试启用"低VRAM模式"可能会解决显存不足问题');
+          } else if (errorMessage.includes('Python')) {
+            ElMessage.warning('提示: 检查Python路径是否正确，或在设置中指定Python解释器路径');
+          } else if (errorMessage.includes('找不到') || errorMessage.includes('无效')) {
+            ElMessage.warning('提示: 请检查SD安装路径是否正确');
+          }
         }
       } catch (error) {
         console.error('启动失败:', error);
         ElMessage.error(`启动失败: ${error.message}`);
+        
+        // 根据错误类型给出建议
+        if (error.message.includes('timeout') || error.message.includes('超时')) {
+          ElMessage.warning('提示: 启动超时可能是系统资源不足，尝试关闭其他程序后重试');
+        }
       } finally {
         isLoading.value = false;
       }

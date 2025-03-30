@@ -187,6 +187,10 @@ function buildLaunchCommand(options) {
   launchArgs.push('--precision', 'full');
   launchArgs.push('--no-half-vae');
   
+  // 内存优化参数（缓解模型加载问题）
+  launchArgs.push('--opt-split-attention');
+  launchArgs.push('--opt-channelslast');
+  
   // 添加端口参数
   if (options.port) {
     launchArgs.push(`--port=${options.port}`);
@@ -195,6 +199,9 @@ function buildLaunchCommand(options) {
   // 低显存模式
   if (options.lowVram) {
     launchArgs.push('--lowvram');
+  } else {
+    // 如果不是低显存模式，默认使用中等显存优化
+    launchArgs.push('--medvram');
   }
   
   // 启用xFormers
@@ -367,6 +374,8 @@ async function launchStableDiffusion(options = {}) {
       options.sdPath = storedSdPath;
     }
     
+    console.log('[SD] 启动选项:', JSON.stringify(options));
+    
     // 清理选项，只保留需要的参数
     const cleanOptions = {
       sdPath: options.sdPath,
@@ -383,14 +392,25 @@ async function launchStableDiffusion(options = {}) {
       noDownloadModels: !!options.noDownloadModels
     };
     
+    console.log('[SD] 清理后的选项:', JSON.stringify(cleanOptions));
+    
     // 合并默认配置与传入的参数
     const defaultOptions = config.get('launchParams') || {};
     const launchOptions = { ...defaultOptions, ...cleanOptions };
     
+    console.log('[SD] 最终启动选项:', JSON.stringify(launchOptions));
+    
     // 验证配置
     const validation = validateConfig(launchOptions);
     if (!validation.isValid) {
+      console.error('[SD] 配置验证失败:', validation.errors);
       throw new Error(`配置验证失败: ${validation.errors.join(', ')}`);
+    }
+    
+    // 检查SD路径的有效性
+    if (!fs.existsSync(launchOptions.sdPath)) {
+      console.error('[SD] SD路径不存在:', launchOptions.sdPath);
+      throw new Error(`SD安装路径不存在: ${launchOptions.sdPath}`);
     }
     
     // 备份当前配置
@@ -406,67 +426,192 @@ async function launchStableDiffusion(options = {}) {
     }
     
     // 使用子进程执行命令
-    sdProcess = spawn(command, [], { 
-      shell: true,
-      windowsHide: false
-    });
+    try {
+      // 将命令分解为可执行文件和参数
+      let execPath, execArgs;
+      
+      if (process.platform === 'win32') {
+        execPath = 'cmd.exe';
+        execArgs = ['/c', command];
+      } else {
+        execPath = '/bin/bash';
+        execArgs = ['-c', command];
+      }
+      
+      console.log(`[SD] 使用 ${execPath} 执行命令`);
+      
+      sdProcess = spawn(execPath, execArgs, { 
+        shell: false,  // 直接使用指定的shell
+        windowsHide: false,
+        env: Object.assign({}, process.env, { 
+          PYTHONIOENCODING: 'utf-8',
+          PYTHONUNBUFFERED: '1'  // 禁用Python输出缓冲
+        })
+      });
+    } catch (spawnError) {
+      console.error('[SD] 创建进程时出错:', spawnError);
+      throw new Error(`创建进程失败: ${spawnError.message}`);
+    }
+    
+    if (!sdProcess || !sdProcess.pid) {
+      console.error('[SD] 进程创建失败');
+      throw new Error('无法启动SD进程');
+    }
+    
+    console.log('[SD] 进程已启动，PID:', sdProcess.pid);
     
     isRunning = true;
     
     // 启动进程监控
     startProcessMonitoring();
     
-    // 处理标准输出
-    sdProcess.stdout.on('data', (data) => {
-      const output = data.toString();
-      console.log('[SD]', output);
-      
-      // 更新心跳时间
-      lastHeartbeat = Date.now();
-      
-      // 发送日志到渲染进程
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('sd:log', output);
-      }
-      
-      // 检测服务器是否已启动
-      if (output.includes('Running on local URL:') || output.includes('To create a public link')) {
+    // 设置一个超时，如果太长时间没有收到启动成功的信息
+    const launchTimeout = setTimeout(() => {
+      if (isRunning && sdProcess) {
+        console.warn('[SD] 启动超时，但进程仍在运行。可能需要检查日志。');
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('sd:started', true);
+          mainWindow.webContents.send('sd:log', '启动超时，但进程仍在运行。请检查输出日志。');
         }
       }
+    }, 60000); // 60秒超时
+    
+    // 创建一个Promise在进程启动成功时返回
+    const launchPromise = new Promise((resolve, reject) => {
+      // 监听进程输出以确定是否启动成功
+      let stdoutBuffer = '';
+      let stderrBuffer = '';
+      let hasStarted = false;
       
-      // 检测常见错误
-      if (output.includes('CUDA out of memory') || 
-          output.includes('RuntimeError') ||
-          output.includes('ImportError')) {
-        handleProcessFailure(output.trim());
-      }
+      // 成功启动的标志
+      const successMarkers = [
+        'Running on local URL',
+        'To create a public link',
+        'Running on'
+      ];
+      
+      // 错误标志
+      const errorMarkers = [
+        'CUDA out of memory',
+        'RuntimeError',
+        'ImportError',
+        'failed to load',
+        'Error:',
+        'Exception:',
+        'Failed to'
+      ];
+      
+      // 处理标准输出
+      sdProcess.stdout.on('data', (data) => {
+        const output = data.toString('utf8');
+        stdoutBuffer += output;
+        
+        // 记录日志
+        console.log('[SD]', output);
+        
+        // 更新心跳时间
+        lastHeartbeat = Date.now();
+        
+        // 发送日志到渲染进程
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('sd:log', output);
+        }
+        
+        // 检查是否包含成功启动的标记
+        for (const marker of successMarkers) {
+          if (output.includes(marker) && !hasStarted) {
+            hasStarted = true;
+            clearTimeout(launchTimeout);
+            console.log('[SD] 检测到启动成功标记:', marker);
+            
+            // 发送已启动事件
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('sd:started', true);
+            }
+            
+            resolve({ success: true, message: '服务已成功启动' });
+            break;
+          }
+        }
+        
+        // 检查是否包含错误标记
+        for (const marker of errorMarkers) {
+          if (output.includes(marker)) {
+            console.error('[SD] 检测到错误标记:', marker);
+            // 不要立即拒绝，因为这可能只是一个警告
+            break;
+          }
+        }
+      });
+      
+      // 处理错误输出
+      sdProcess.stderr.on('data', (data) => {
+        const error = data.toString('utf8');
+        stderrBuffer += error;
+        
+        // 记录错误
+        console.error('[SD Error]', error);
+        
+        // 更新心跳时间
+        lastHeartbeat = Date.now();
+        
+        // 标记为错误输出
+        const formattedError = `[STDERR] ${error.trim()}`;
+        
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('sd:error', formattedError);
+        }
+        
+        // 检查是否包含严重错误
+        let hasFatalError = false;
+        for (const marker of errorMarkers) {
+          if (error.includes(marker)) {
+            console.error('[SD] 在stderr中检测到错误:', marker);
+            hasFatalError = true;
+            break;
+          }
+        }
+        
+        // 如果包含严重错误，拒绝Promise
+        if (hasFatalError && !hasStarted) {
+          clearTimeout(launchTimeout);
+          const errorMessage = `启动失败: ${error.trim()}`;
+          reject(new Error(errorMessage));
+        }
+      });
+      
+      // 处理Promise内的进程关闭事件
+      sdProcess.once('close', (code) => {
+        clearTimeout(launchTimeout);
+        if (code !== 0 && !hasStarted) {
+          const errorMsg = `进程异常退出，退出码: ${code}\n标准输出: ${stdoutBuffer}\n错误输出: ${stderrBuffer}`;
+          console.error('[SD] 进程异常退出:', errorMsg);
+          reject(new Error(errorMsg));
+        }
+      });
+      
+      // 处理Promise内的进程错误
+      sdProcess.once('error', (err) => {
+        clearTimeout(launchTimeout);
+        if (!hasStarted) {
+          console.error('[SD] 进程启动错误:', err);
+          reject(err);
+        }
+      });
     });
     
-    // 处理错误输出
-    sdProcess.stderr.on('data', (data) => {
-      const error = data.toString();
-      console.error('[SD Error]', error);
-      
-      // 更新心跳时间
-      lastHeartbeat = Date.now();
-      
-      // 标记为错误输出
-      const formattedError = `[STDERR] ${error.trim()}`;
-      
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('sd:error', formattedError);
-      }
-      
-      // 检测严重错误
-      if (error.includes('Fatal error') || 
-          error.includes('Critical error') ||
-          error.includes('Failed to initialize')) {
-        handleProcessFailure(error.trim());
-      }
+    // 等待启动结果，设置10秒超时
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        if (sdProcess && isRunning) {
+          // 进程依然在运行，可能已经启动成功但没有检测到
+          return { success: true, message: '服务已启动，但没有收到确认信号' };
+        } else {
+          reject(new Error('启动超时'));
+        }
+      }, 10000);
     });
     
+    // 添加全局事件处理程序
     // 进程结束处理
     sdProcess.on('close', (code) => {
       console.log(`[SD] 进程已退出，代码: ${code}`);
@@ -487,25 +632,29 @@ async function launchStableDiffusion(options = {}) {
       }
     });
     
-    // 进程错误处理
-    sdProcess.on('error', (err) => {
-      console.error('[SD] 启动错误:', err);
-      const errorMessage = `启动进程错误: ${err.message}`;
-      
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('sd:error', errorMessage);
+    // 返回第一个完成的Promise结果
+    try {
+      const result = await Promise.race([launchPromise, timeoutPromise]);
+      return result;
+    } catch (error) {
+      console.error('[SD] 启动错误:', error.message);
+      // 如果失败了，尝试关闭进程
+      if (sdProcess) {
+        try {
+          stopStableDiffusion();
+        } catch (stopError) {
+          console.error('[SD] 停止失败的进程时出错:', stopError);
+        }
       }
-      
-      handleProcessFailure(errorMessage);
-    });
+      return { success: false, error: error.message };
+    }
     
-    return true;
   } catch (error) {
     console.error('[SD] 启动失败:', error);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('sd:error', `启动失败: ${error.message}`);
     }
-    throw error;
+    return { success: false, error: error.message };
   }
 }
 
