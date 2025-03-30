@@ -2,6 +2,10 @@
 
 SD-GUI是一个基于Electron、Vue 3和Element Plus的桌面应用程序，用于与Stable Diffusion API进行交互，提供直观的图像生成界面。
 
+由cursor生成的屎山，但是能用
+
+
+
 ## 功能特点
 
 - 文生图：通过文本提示词生成图像
