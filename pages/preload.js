@@ -79,7 +79,8 @@ if (isElectron && contextBridge && ipcRenderer) {
       validate: (config) => ipcRenderer.invoke('validateConfig', config),
       backup: () => ipcRenderer.invoke('backupConfig'),
       restore: (timestamp) => ipcRenderer.invoke('restoreConfig', timestamp),
-      getBackups: () => ipcRenderer.invoke('getConfigBackups')
+      getBackups: () => ipcRenderer.invoke('getConfigBackups'),
+      deleteBackup: (timestamp) => ipcRenderer.invoke('deleteConfigBackup', timestamp)
     },
     
     // 添加模型管理API
@@ -176,7 +177,8 @@ if (isElectron && contextBridge && ipcRenderer) {
       validate: () => Promise.resolve({ isValid: true, errors: [] }),
       backup: () => Promise.resolve(true),
       restore: () => Promise.resolve({ success: false, error: '非Electron环境' }),
-      getBackups: () => Promise.resolve([])
+      getBackups: () => Promise.resolve([]),
+      deleteBackup: () => Promise.resolve({ success: false, error: '非Electron环境' })
     },
     
     // 添加模型管理模拟API

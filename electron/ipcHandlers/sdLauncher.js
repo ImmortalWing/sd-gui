@@ -120,6 +120,17 @@ function getConfigBackups() {
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 }
 
+// 删除配置备份
+function deleteConfigBackup(timestamp) {
+  const backupKey = `backup_${timestamp}`;
+  if (!backupConfig.has(backupKey)) {
+    throw new Error('找不到指定的配置备份');
+  }
+  
+  backupConfig.delete(backupKey);
+  return true;
+}
+
 // 全局变量，存储SD进程
 let sdProcess = null;
 let isRunning = false;
@@ -334,19 +345,38 @@ async function handleProcessFailure(reason) {
 
 // 启动SD服务
 async function launchStableDiffusion(options = {}) {
-  if (isRunning) {
-    throw new Error('Stable Diffusion已在运行中');
-  }
-  
   try {
-    // 确保传入的是简单对象
+    if (isRunning) {
+      throw new Error('Stable Diffusion已在运行中');
+    }
+    
+    // 重置启动尝试计数
+    restartAttempts = 0;
+    
+    // 设置进程开始时间
+    processStartTime = Date.now();
+    lastHeartbeat = Date.now();
+    
+    // 确保配置项中包含sdPath
+    if (!options.sdPath) {
+      // 尝试从配置中获取sdPath
+      const storedSdPath = config.get('sdPath');
+      if (!storedSdPath) {
+        throw new Error('SD安装路径未设置，请在设置中配置SD路径');
+      }
+      options.sdPath = storedSdPath;
+    }
+    
+    // 清理选项，只保留需要的参数
     const cleanOptions = {
+      sdPath: options.sdPath,
+      pythonPath: options.pythonPath || config.get('pythonPath'),
       port: options.port || 7860,
       lowVram: !!options.lowVram,
-      enableXformers: options.enableXformers !== false,
+      enableXformers: !!options.enableXformers,
+      model: options.model,
       autoLaunchBrowser: options.autoLaunchBrowser !== false,
-      customArgs: typeof options.customArgs === 'string' ? options.customArgs : '',
-      model: typeof options.model === 'string' ? options.model : '',
+      customArgs: options.customArgs || '',
       offlineMode: !!options.offlineMode,
       skipTorchCudaTest: !!options.skipTorchCudaTest,
       skipPythonCheck: !!options.skipPythonCheck,
@@ -544,6 +574,10 @@ function setupIpcHandlers() {
   
   ipcMain.handle('getConfigBackups', async () => {
     return getConfigBackups();
+  });
+  
+  ipcMain.handle('deleteConfigBackup', async (event, timestamp) => {
+    return deleteConfigBackup(timestamp);
   });
 }
 

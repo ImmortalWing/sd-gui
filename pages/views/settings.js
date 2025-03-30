@@ -553,6 +553,15 @@ window.Settings = {
           await loadSettings();
           
           ElementPlus.ElMessage.success('配置恢复成功');
+        } catch (restoreError) {
+          // 处理恢复错误
+          console.error('恢复配置时出错:', restoreError);
+          ElementPlus.ElMessage.error(`恢复配置失败: ${restoreError.message || '未知错误'}`);
+          
+          // 如果是SD路径验证错误，提示用户
+          if (restoreError.message && restoreError.message.includes('sdPath')) {
+            ElementPlus.ElMessage.warning('备份中的SD安装路径无效，请重新设置SD路径');
+          }
         } finally {
           // 确保加载实例关闭
           if (loadingInstance) {

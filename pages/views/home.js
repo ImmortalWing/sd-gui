@@ -223,6 +223,7 @@ window.Home = {
       try {
         // 创建一个简单的纯对象，避免传递复杂的响应式对象
         const options = {
+          sdPath: sdPath.value, // 确保传递sdPath
           port: launchOptions.port,
           lowVram: launchOptions.lowVram,
           enableXformers: launchOptions.enableXformers,
