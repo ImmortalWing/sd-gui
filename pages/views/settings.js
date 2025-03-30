@@ -121,6 +121,42 @@ window.Settings = {
           </el-card>
         </el-col>
       </el-row>
+
+      <!-- 配置备份和恢复 -->
+      <el-row :gutter="16" class="mt-16">
+        <el-col :span="24">
+          <el-card class="setting-card" shadow="hover">
+            <template #header>
+              <div class="card-header">
+                <h3>配置备份与恢复</h3>
+                <el-button type="primary" size="small" @click="backupConfig">创建备份</el-button>
+              </div>
+            </template>
+            
+            <div class="backup-list">
+              <el-table :data="configBackups" style="width: 100%" size="small">
+                <el-table-column prop="timestamp" label="备份时间" width="180">
+                  <template #default="scope">
+                    {{ formatTimestamp(scope.row.timestamp) }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="config.sdPath" label="SD路径" />
+                <el-table-column prop="config.pythonPath" label="Python路径" />
+                <el-table-column label="操作" width="150">
+                  <template #default="scope">
+                    <el-button type="primary" size="small" @click="restoreConfig(scope.row.timestamp)">
+                      恢复
+                    </el-button>
+                    <el-button type="danger" size="small" @click="deleteBackup(scope.row.timestamp)">
+                      删除
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
     </div>
   `,
   
@@ -145,6 +181,9 @@ window.Settings = {
       memory: '未知',
       gpu: '未知'
     });
+    
+    // 配置备份相关
+    const configBackups = window.Vue.ref([]);
     
     // 加载设置
     const loadSettings = async () => {
@@ -432,9 +471,128 @@ window.Settings = {
       document.body.className = theme === 'dark' ? 'dark-theme' : 'light-theme';
     };
     
+    // 加载配置备份列表
+    const loadConfigBackups = async () => {
+      try {
+        const backups = await window.electron.config.getBackups();
+        configBackups.value = backups;
+      } catch (error) {
+        console.error('加载配置备份失败:', error);
+        ElementPlus.ElMessage.error('加载配置备份失败');
+      }
+    };
+    
+    // 创建配置备份
+    const backupConfig = async () => {
+      try {
+        const loadingInstance = ElementPlus.ElLoading.service({
+          lock: true,
+          text: '正在创建备份...',
+          background: 'rgba(0, 0, 0, 0.7)'
+        });
+        
+        await window.electron.config.backup();
+        
+        loadingInstance.close();
+        
+        // 重新加载备份列表
+        await loadConfigBackups();
+        
+        ElementPlus.ElMessage.success('配置备份创建成功');
+      } catch (error) {
+        console.error('创建配置备份失败:', error);
+        ElementPlus.ElMessage.error('创建配置备份失败');
+      }
+    };
+    
+    // 恢复配置备份
+    const restoreConfig = async (timestamp) => {
+      try {
+        const { value: confirmed } = await ElementPlus.ElMessageBox.confirm(
+          '恢复此配置备份将覆盖当前的所有设置，确定要继续吗？',
+          '确认恢复',
+          {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }
+        );
+        
+        if (!confirmed) return;
+        
+        const loadingInstance = ElementPlus.ElLoading.service({
+          lock: true,
+          text: '正在恢复配置...',
+          background: 'rgba(0, 0, 0, 0.7)'
+        });
+        
+        await window.electron.config.restore(timestamp);
+        
+        loadingInstance.close();
+        
+        // 重新加载所有设置
+        await loadSettings();
+        
+        ElementPlus.ElMessage.success('配置恢复成功');
+      } catch (error) {
+        if (error !== 'cancel') {
+          console.error('恢复配置备份失败:', error);
+          ElementPlus.ElMessage.error('恢复配置备份失败');
+        }
+      }
+    };
+    
+    // 删除配置备份
+    const deleteBackup = async (timestamp) => {
+      try {
+        const { value: confirmed } = await ElementPlus.ElMessageBox.confirm(
+          '确定要删除此配置备份吗？此操作不可恢复。',
+          '确认删除',
+          {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }
+        );
+        
+        if (!confirmed) return;
+        
+        const loadingInstance = ElementPlus.ElLoading.service({
+          lock: true,
+          text: '正在删除备份...',
+          background: 'rgba(0, 0, 0, 0.7)'
+        });
+        
+        await window.electron.config.deleteBackup(timestamp);
+        
+        loadingInstance.close();
+        
+        // 重新加载备份列表
+        await loadConfigBackups();
+        
+        ElementPlus.ElMessage.success('配置备份删除成功');
+      } catch (error) {
+        if (error !== 'cancel') {
+          console.error('删除配置备份失败:', error);
+          ElementPlus.ElMessage.error('删除配置备份失败');
+        }
+      }
+    };
+    
+    // 格式化时间戳
+    const formatTimestamp = (timestamp) => {
+      try {
+        const date = new Date(timestamp);
+        return date.toLocaleString();
+      } catch (error) {
+        return timestamp;
+      }
+    };
+    
     // 组件挂载时
     window.Vue.onMounted(() => {
       loadSettings();
+      loadConfigBackups();
     });
     
     return {
@@ -448,6 +606,11 @@ window.Settings = {
       pythonPathWarning,
       uiSettings,
       systemInfo,
+      configBackups,
+      backupConfig,
+      restoreConfig,
+      deleteBackup,
+      formatTimestamp,
       selectSdPath,
       selectModelsPath,
       openModelsFolder,

@@ -75,7 +75,11 @@ if (isElectron && contextBridge && ipcRenderer) {
       get: (key) => ipcRenderer.invoke('getConfig', key),
       set: (key, value) => ipcRenderer.invoke('setConfig', key, value),
       setSdPath: (path) => ipcRenderer.invoke('configSdPath', path),
-      setPythonPath: (path) => ipcRenderer.invoke('configPythonPath', path)
+      setPythonPath: (path) => ipcRenderer.invoke('configPythonPath', path),
+      validate: (config) => ipcRenderer.invoke('validateConfig', config),
+      backup: () => ipcRenderer.invoke('backupConfig'),
+      restore: (timestamp) => ipcRenderer.invoke('restoreConfig', timestamp),
+      getBackups: () => ipcRenderer.invoke('getConfigBackups')
     },
     
     // 添加模型管理API
@@ -168,7 +172,11 @@ if (isElectron && contextBridge && ipcRenderer) {
       },
       set: () => Promise.resolve(true),
       setSdPath: () => Promise.resolve({ success: false, error: '非Electron环境' }),
-      setPythonPath: () => Promise.resolve({ success: false, error: '非Electron环境' })
+      setPythonPath: () => Promise.resolve({ success: false, error: '非Electron环境' }),
+      validate: () => Promise.resolve({ isValid: true, errors: [] }),
+      backup: () => Promise.resolve(true),
+      restore: () => Promise.resolve({ success: false, error: '非Electron环境' }),
+      getBackups: () => Promise.resolve([])
     },
     
     // 添加模型管理模拟API
