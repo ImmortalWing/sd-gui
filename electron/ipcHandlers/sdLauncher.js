@@ -68,7 +68,7 @@ function validateConfig(config) {
 }
 
 // 备份配置
-function backupConfig() {
+function backupConfigData() {
   const currentConfig = config.store;
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   backupConfig.set(`backup_${timestamp}`, currentConfig);
@@ -364,7 +364,7 @@ async function launchStableDiffusion(options = {}) {
     }
     
     // 备份当前配置
-    backupConfig();
+    backupConfigData();
     
     // 构建启动命令
     const command = buildLaunchCommand(launchOptions);
@@ -534,7 +534,7 @@ function setupIpcHandlers() {
   });
   
   ipcMain.handle('backupConfig', async () => {
-    backupConfig();
+    backupConfigData();
     return true;
   });
   
