@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>SD-GUI</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus@2.3.8/dist/index.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    }
+    
+    .app-container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    
+    .title-bar {
+      height: 40px;
+      background: var(--el-color-primary);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      -webkit-app-region: drag;
+      color: white;
+      padding: 0 15px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
+      font-size: 16px;
+      font-weight: 500;
+    }
+    
+    .title-bar-buttons {
+      display: flex;
+      -webkit-app-region: no-drag;
+      align-items: center;
+    }
+    
+    .title-bar-button {
+      width: 24px;
+      height: 24px;
+      margin-left: 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.2s;
+      color: white;
+    }
+    
+    .title-bar-button:hover {
+      background-color: rgba(255, 255, 255, 0.2);
+    }
+    
+    .title-bar-button.close:hover {
+      background-color: #f56c6c;
+    }
+    
+    .content-container {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    
+    .nav-container {
+      width: 250px;
+      background-color: #f3f2f1;
+      border-right: 1px solid #e0e0e0;
+    }
+    
+    .main-container {
+      flex: 1;
+      padding: 20px;
+      background-color: #ffffff;
+      overflow-y: auto;
+    }
+    
+    .nav-menu {
+      height: 100%;
+      border-right: none;
+    }
+    
+    .nav-menu .el-menu-item,
+    .nav-menu .el-sub-menu__title {
+      height: 50px;
+      line-height: 50px;
+    }
+    
+    .nav-menu .el-menu-item .el-icon,
+    .nav-menu .el-sub-menu__title .el-icon {
+      margin-right: 10px;
+    }
+    
+    .preview-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: #f5f5f5;
+      border-radius: 4px;
+    }
+    
+    .preview-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      color: #909399;
+    }
+    
+    .preview-placeholder .el-icon {
+      font-size: 48px;
+      margin-bottom: 10px;
+    }
+    
+    .preview-image {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    
+    .image-uploader {
+      width: 100%;
+      height: 200px;
+      border: 1px dashed #d9d9d9;
+      border-radius: 4px;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .image-uploader:hover {
+      border-color: #409EFF;
+    }
+    
+    .image-uploader-icon {
+      font-size: 28px;
+      color: #8c939d;
+    }
+    
+    .uploaded-image {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .preview-actions {
+      display: flex;
+      gap: 10px;
+    }
+  </style>
+  <!-- 移除有问题的CSS引用 -->
+</head>
+<body>
+  <div class="app-container">
+    <div class="title-bar">
+      <div class="title">Stable Diffusion Launcher</div>
+      <div class="title-bar-buttons">
+        <div class="title-bar-button minimize" id="btn-minimize">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M4 12h16v1.5H4z"></path>
+          </svg>
+        </div>
+        <div class="title-bar-button maximize" id="btn-maximize">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M4 4h16v16H4V4zm2 4v10h12V8H6z"></path>
+          </svg>
+        </div>
+        <div class="title-bar-button close" id="btn-close">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path>
+          </svg>
+        </div>
+      </div>
+    </div>
+    <div class="content-container">
+      <div class="nav-container">
+        <div id="nav"></div>
+      </div>
+      <div class="main-container">
+        <div id="app"></div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 导入脚本 -->
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vue-router@4.2.4/dist/vue-router.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/element-plus@2.3.8/dist/index.full.min.js"></script>
+  <!-- 直接使用图标JS，移除有问题的CSS引用 -->
+  <script src="https://cdn.jsdelivr.net/npm/@element-plus/icons-vue@2.1.0/dist/index.iife.min.js"></script>
+  
+  <!-- 修改图标库导入方式 -->
+  <script>
+    // 使用 Element Plus 官方图标
+    window.ElementPlusIconsVue = ElementPlusIconsVue;
+  </script>
+  
+  <!-- 预加载脚本 -->
+  <script src="./preload.js"></script>
+  
+  <!-- 定义electronAPI -->
+  <script>
+    window.electronAPI = {
+      minimizeWindow: () => window.electron?.ipcRenderer.invoke('minimizeWindow'),
+      maximizeWindow: () => window.electron?.ipcRenderer.invoke('maximizeWindow'),
+      closeWindow: () => window.electron?.ipcRenderer.invoke('closeWindow')
+    };
+  </script>
+  
+  <!-- 应用入口 -->
+  <script>
+    // 定义全局Vue和Vue Router
+    window.Vue = Vue;
+    window.VueRouter = VueRouter;
+  
+    // 等待DOM加载完成
+    document.addEventListener('DOMContentLoaded', () => {
+      // 处理窗口控制按钮
+      document.getElementById('btn-minimize').addEventListener('click', () => {
+        window.electronAPI.minimizeWindow();
+      });
+      
+      document.getElementById('btn-maximize').addEventListener('click', () => {
+        window.electronAPI.maximizeWindow();
+      });
+      
+      document.getElementById('btn-close').addEventListener('click', () => {
+        // 检查SD服务是否正在运行
+        if (window.electron) {
+          window.electron.sdLauncher.getStatus().then(status => {
+            if (status.isRunning) {
+              // 如果SD服务正在运行，弹出确认对话框
+              ElementPlus.ElMessageBox.confirm(
+                'Stable Diffusion服务正在运行中，关闭程序将同时停止服务。确定要退出吗？',
+                '确认退出',
+                {
+                  confirmButtonText: '确定',
+                  cancelButtonText: '取消',
+                  type: 'warning',
+                }
+              ).then(() => {
+                window.electronAPI.closeWindow();
+              }).catch(() => {
+                // 用户取消关闭
+              });
+            } else {
+              // SD服务没有运行，直接关闭窗口
+              window.electronAPI.closeWindow();
+            }
+          });
+        } else {
+          // 如果electron对象不可用，直接关闭
+          window.electronAPI.closeWindow();
+        }
+      });
+
+      // 创建应用入口组件
+      const App = {
+        template: `<router-view></router-view>`
+      };
+      
+      // 先加载router.js
+      const loadRouter = () => {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = './router.js';
+          script.onload = () => {
+            console.log('router.js已加载');
+            resolve();
+          };
+          script.onerror = (e) => {
+            console.error('加载router.js失败:', e);
+            reject(new Error('无法加载router.js'));
+          };
+          document.head.appendChild(script);
+        });
+      };
+      
+      // 预加载所有视图组件
+      const loadComponents = () => {
+        return new Promise((resolve) => {
+          // 加载所有组件的脚本
+          const componentPaths = [
+            './views/model-management.js',  // 将模型管理组件放在最前面
+            './views/home.js',
+            './views/txt2img.js',
+            './views/img2img.js',
+            './views/settings.js',
+            './views/environment.js'
+          ];
+          
+          let loadedCount = 0;
+          componentPaths.forEach(path => {
+            const script = document.createElement('script');
+            script.src = path;
+            script.onload = () => {
+              loadedCount++;
+              console.log(`组件脚本 ${path} 已加载 (${loadedCount}/${componentPaths.length})`);
+              if (loadedCount === componentPaths.length) {
+                console.log('所有组件已加载完成');
+                resolve();
+              }
+            };
+            script.onerror = (e) => {
+              console.error(`加载组件 ${path} 失败:`, e);
+              loadedCount++;
+              if (loadedCount === componentPaths.length) {
+                console.log('组件加载完成(有错误)');
+                resolve();
+              }
+            };
+            document.head.appendChild(script);
+          });
+        });
+      };
+      
+      // 按顺序加载
+      loadRouter().then(() => {
+        return loadComponents();
+      }).then(() => {
+        // 加载导航组件
+        const navScript = document.createElement('script');
+        navScript.src = './element-nav.js';
+        navScript.onload = () => {
+          // 创建应用实例
+          const app = Vue.createApp(App);
+          
+          // 使用路由
+          app.use(window.appRouter);
+          
+          // 使用Element Plus
+          app.use(ElementPlus);
+          
+          // 添加所有图标
+          if (window.ElementPlusIconsVue) {
+            // 注册所有图标组件
+            for (const [key, component] of Object.entries(window.ElementPlusIconsVue)) {
+              app.component(key, component);
+            }
+          }
+          
+          // 挂载应用
+          app.mount('#app');
+        };
+        document.head.appendChild(navScript);
+      });
+    });
+  </script>
+</body>
+</html>
