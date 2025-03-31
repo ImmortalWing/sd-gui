@@ -8,6 +8,7 @@ const { setupIpcHandlers } = require('./apiHandler')
 const remoteMain = require('@electron/remote/main')
 const { exec } = require('child_process')
 const { config } = require('./config')
+const { execPromise } = require('./utils')
 
 // 初始化remote模块
 remoteMain.initialize()
@@ -230,24 +231,46 @@ ipcMain.handle('get-python-versions', async () => {
   }
 });
 
-// 辅助函数：Promise化的exec
-function execPromise(command) {
-  return new Promise((resolve, reject) => {
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve({ stdout, stderr });
-    });
-  });
-}
-
 // 设置IPC处理器
 setupIpcHandlers(ipcMain)
 
 // 初始化应用
 app.whenReady().then(() => {
+  // 设置全局默认编码为UTF-8
+  if (process.platform === 'win32') {
+    // 设置环境变量
+    process.env.PYTHONIOENCODING = 'utf-8';
+    process.env.NODE_OPTIONS = '--no-warnings';
+    process.env.LANG = 'zh_CN.UTF-8';
+    process.env.LC_ALL = 'zh_CN.UTF-8';
+    
+    // 运行命令设置控制台代码页
+    exec('chcp 65001', (error) => {
+      if (error) {
+        console.error('设置控制台代码页失败:', error);
+      } else {
+        console.log('控制台代码页已设置为UTF-8');
+      }
+    });
+    
+    // 输出VSCode编码配置建议
+    console.log(`
+================================================
+VSCode终端中文显示建议配置:
+1. 打开设置 (Ctrl+,)
+2. 搜索 "terminal.integrated.defaultProfile.windows"
+3. 设置为 "Command Prompt"
+4. 搜索 "terminal.integrated.profiles.windows"
+5. 添加/修改Command Prompt配置:
+   "Command Prompt": {
+     "path": "C:\\Windows\\System32\\cmd.exe",
+     "args": ["/K", "chcp 65001"],
+     "icon": "terminal-cmd"
+   }
+================================================
+    `);
+  }
+  
   // 创建主窗口
   createWindow()
 

@@ -158,7 +158,10 @@ async function launchStableDiffusion(options = {}) {
     const env = {
       ...process.env,
       PYTHONIOENCODING: 'utf-8',
-      PYTHONUNBUFFERED: '1'
+      PYTHONUNBUFFERED: '1',
+      PYTHONLEGACYWINDOWSSTDIO: '1', // 解决Windows下Python的stdout编码问题
+      LANG: 'zh_CN.UTF-8',
+      LC_ALL: 'zh_CN.UTF-8'
     };
     
     // 启动进程
@@ -166,14 +169,48 @@ async function launchStableDiffusion(options = {}) {
     console.log('[SD] 工作目录:', sdPath);
     console.log('[SD] 环境变量:', env);
     
+    // 解决路径中文问题
+    let escSdPath = sdPath;
+    // 如果路径中包含中文，使用短路径名
+    if (/[\u4e00-\u9fa5]/.test(sdPath) && process.platform === 'win32') {
+      try {
+        const { stdout } = await execPromise(`for %I in ("${sdPath}") do @echo %~sI`);
+        if (stdout && stdout.trim()) {
+          escSdPath = stdout.trim();
+          console.log('[SD] 使用短路径:', escSdPath);
+        }
+      } catch (error) {
+        console.error('[SD] 获取短路径失败:', error);
+      }
+    }
+    
     if (process.platform === 'win32') {
-      // Windows使用cmd.exe
-      sdProcess = spawn('cmd.exe', ['/c', command], {
-        cwd: sdPath,
-        env: env,
-        shell: false,
-        windowsHide: true
-      });
+      // Windows使用cmd.exe，先设置代码页为UTF-8
+      try {
+        // 创建bat文件来执行命令，避免命令行长度和编码问题
+        const tmpDir = path.join(app.getPath('temp'), 'sd-gui');
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+        
+        const batPath = path.join(tmpDir, 'run_sd.bat');
+        const batContent = `@echo off
+chcp 65001 >nul
+cd /d "${escSdPath}"
+${command}
+`;
+        
+        fs.writeFileSync(batPath, batContent);
+        
+        // 使用bat文件启动进程
+        sdProcess = spawn('cmd.exe', ['/c', batPath], {
+          env: env,
+          windowsHide: false
+        });
+      } catch (error) {
+        console.error('[SD] 创建启动脚本失败:', error);
+        throw error;
+      }
     } else {
       // Linux/Mac直接执行命令
       sdProcess = spawn(command, [], {
@@ -193,16 +230,20 @@ async function launchStableDiffusion(options = {}) {
     
     // 监听输出
     sdProcess.stdout.on('data', (data) => {
-      console.log('[SD] 输出:', data.trim());
+      // 确保数据是UTF-8编码的字符串
+      const text = Buffer.isBuffer(data) ? Buffer.from(data).toString('utf8') : data.toString();
+      console.log('[SD] 输出:', text.trim());
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('sd:output', data.trim());
+        mainWindow.webContents.send('sd:output', text.trim());
       }
     });
     
     sdProcess.stderr.on('data', (data) => {
-      console.error('[SD] 错误:', data.trim());
+      // 确保数据是UTF-8编码的字符串
+      const text = Buffer.isBuffer(data) ? Buffer.from(data).toString('utf8') : data.toString();
+      console.error('[SD] 错误:', text.trim());
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('sd:error', data.trim());
+        mainWindow.webContents.send('sd:error', text.trim());
       }
     });
     
@@ -450,8 +491,8 @@ function buildLaunchCommand(options) {
       console.log('[SD] 使用系统默认Python');
     }
     
-    // 构建cmd.exe命令
-    command = `cmd.exe /c "cd "${sdPath}" && ${pythonExe} "${path.join(sdPath, scriptName)}" ${launchArgs.join(' ')}"`;
+    // 构建命令 - 修改引号处理方式
+    command = `${pythonExe} "${path.join(sdPath, scriptName)}" ${launchArgs.join(' ')}`;
   } else {
     // Linux/Mac使用自定义Python路径或默认的python3
     let pythonExe;

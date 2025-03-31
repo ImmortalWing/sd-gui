@@ -1,0 +1,17 @@
+{
+  "terminal.integrated.defaultProfile.windows": "Command Prompt",
+  "terminal.integrated.profiles.windows": {
+    "Command Prompt": {
+      "path": "C:\\Windows\\System32\\cmd.exe",
+      "args": ["/K", "chcp 65001"],
+      "icon": "terminal-cmd"
+    }
+  },
+  "terminal.integrated.env.windows": {
+    "PYTHONIOENCODING": "utf-8",
+    "LANG": "zh_CN.UTF-8"
+  },
+  "files.encoding": "utf8",
+  "files.autoGuessEncoding": true,
+  "terminal.integrated.fontFamily": "Consolas, 'Microsoft YaHei', monospace"
+} 
