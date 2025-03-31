@@ -1,21 +1,16 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
-const Store = require('electron-store')
 const sdLauncher = require('./ipcHandlers/sdLauncher')
 const modelManager = require('./ipcHandlers/modelManager')
 const pythonEnv = require('./ipcHandlers/pythonEnv')
 const { setupIpcHandlers } = require('./apiHandler')
 const remoteMain = require('@electron/remote/main')
 const { exec } = require('child_process')
+const { config } = require('./config')
 
 // 初始化remote模块
 remoteMain.initialize()
-
-// 初始化配置存储
-const config = new Store({
-  name: 'sd-launcher-config'
-});
 
 // 全局变量，存储主窗口引用
 let mainWindow = null;
