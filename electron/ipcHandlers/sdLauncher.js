@@ -99,6 +99,87 @@ function setupIpcHandlers() {
   ipcMain.handle('sd:status', getSDStatus);
 }
 
+// 添加一个函数来尝试复制已有的模型文件
+async function copyExistingClipModel(sdPath) {
+  try {
+    // 检查是否有本地已下载的CLIP模型
+    const userDataPath = app.getPath('userData');
+    const appModelsPath = path.join(userDataPath, 'models', 'clip');
+    
+    // 目标目录
+    const modelDir = path.join(sdPath, 'models');
+    const clipModelDir = path.join(modelDir, 'openai-clip-vit-large-patch14');
+    
+    // 确保目标目录存在
+    if (!fs.existsSync(clipModelDir)) {
+      fs.mkdirSync(clipModelDir, { recursive: true });
+    }
+    
+    // 检查本地是否有已下载的模型文件
+    if (fs.existsSync(appModelsPath)) {
+      const files = fs.readdirSync(appModelsPath);
+      if (files.length > 0) {
+        console.log('[SD] 发现本地CLIP模型文件，尝试复制');
+        
+        // 复制文件到SD目录
+        files.forEach(file => {
+          const sourcePath = path.join(appModelsPath, file);
+          const destPath = path.join(clipModelDir, file);
+          
+          if (fs.existsSync(sourcePath) && fs.statSync(sourcePath).isFile()) {
+            fs.copyFileSync(sourcePath, destPath);
+            console.log(`[SD] 复制文件: ${file}`);
+          }
+        });
+        
+        console.log('[SD] 复制CLIP模型文件完成');
+        return true;
+      }
+    }
+    
+    console.log('[SD] 未找到本地CLIP模型文件');
+    return false;
+  } catch (error) {
+    console.error('[SD] 复制CLIP模型文件失败:', error);
+    return false;
+  }
+}
+
+// 添加一个函数来预处理CLIP模型路径
+async function prepareClipModelPath(sdPath) {
+  try {
+    // 创建CLIP模型的特定目录结构
+    const modelDir = path.join(sdPath, 'models');
+    const clipModelDir = path.join(modelDir, 'clip-vit-large-patch14');
+    
+    // 确保CLIP模型目录存在
+    if (!fs.existsSync(clipModelDir)) {
+      console.log('[SD] 创建CLIP模型目录:', clipModelDir);
+      fs.mkdirSync(clipModelDir, { recursive: true });
+    }
+    
+    // 创建目录结构以匹配HF的预期
+    const modelSpecificDir = path.join(modelDir, 'models--openai--clip-vit-large-patch14');
+    const snapshotDir = path.join(modelSpecificDir, 'snapshots');
+    const placeholderDir = path.join(snapshotDir, 'placeholder');
+    
+    if (!fs.existsSync(modelSpecificDir)) {
+      console.log('[SD] 创建HF模型目录结构:', modelSpecificDir);
+      fs.mkdirSync(modelSpecificDir, { recursive: true });
+      fs.mkdirSync(snapshotDir, { recursive: true });
+      fs.mkdirSync(placeholderDir, { recursive: true });
+    }
+    
+    // 创建.no_exist文件以防止下载
+    fs.writeFileSync(path.join(modelSpecificDir, '.no_exist'), '');
+    
+    return true;
+  } catch (error) {
+    console.error('[SD] 准备CLIP模型路径失败:', error);
+    return false;
+  }
+}
+
 // 启动SD函数
 async function launchStableDiffusion(options = {}) {
   try {
@@ -114,10 +195,23 @@ async function launchStableDiffusion(options = {}) {
     const lowVram = options.lowVram !== undefined ? options.lowVram : config.get('lowVram');
     const enableXformers = options.enableXformers !== undefined ? options.enableXformers : config.get('enableXformers');
     
+    // 获取 torchConfig
+    const torchConfig = config.get('torchConfig') || {};
+    console.log('[DEBUG] torchConfig:', torchConfig);
+    
     // 验证SD路径
     if (!sdPath || !fs.existsSync(sdPath)) {
       console.error('[SD] 无效的SD路径:', sdPath);
       return { success: false, error: '无效的SD路径' };
+    }
+    
+    // 提前准备CLIP模型路径
+    if (torchConfig.useHfMirror) {
+      console.log('[SD] 提前准备CLIP模型目录结构');
+      await prepareClipModelPath(sdPath);
+      
+      // 尝试复制本地已下载的CLIP模型文件
+      await copyExistingClipModel(sdPath);
     }
     
     // 验证启动脚本
@@ -154,7 +248,10 @@ async function launchStableDiffusion(options = {}) {
     }
     
     // 构建启动命令
-    const command = buildLaunchCommand(options);
+    const command = buildLaunchCommand({ 
+      ...options, 
+      torchConfig 
+    });
     console.log('[SD] 启动命令:', command);
     
     // 设置环境变量
@@ -164,8 +261,93 @@ async function launchStableDiffusion(options = {}) {
       PYTHONUNBUFFERED: '1',
       PYTHONLEGACYWINDOWSSTDIO: '1', // 解决Windows下Python的stdout编码问题
       LANG: 'zh_CN.UTF-8',
-      LC_ALL: 'zh_CN.UTF-8'
+      LC_ALL: 'zh_CN.UTF-8',
+      SD_GUI_VERSION: '1.0.0', // 添加版本信息
+      SD_GUI_LOGS: path.join(app.getPath('userData'), 'logs') // 日志目录
     };
+    
+    // 确保日志目录存在
+    const logsDir = path.join(app.getPath('userData'), 'logs');
+    if (!fs.existsSync(logsDir)) {
+      try {
+        fs.mkdirSync(logsDir, { recursive: true });
+        console.log('[SD] 创建日志目录:', logsDir);
+      } catch (err) {
+        console.error('[SD] 创建日志目录失败:', err);
+      }
+    }
+    
+    // 添加禁用SSL证书验证的环境变量
+    env.CURL_CA_BUNDLE = '';
+    env.SSL_CERT_FILE = '';
+    env.REQUESTS_CA_BUNDLE = '';
+    env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    env.PYTHONWARNINGS = 'ignore:Unverified HTTPS request';
+    
+    // 设置 Hugging Face 镜像
+    if (torchConfig.useHfMirror) {
+      console.log('[SD] 使用 Hugging Face 镜像源: hf-mirror.com');
+      env.HF_ENDPOINT = 'https://hf-mirror.com';
+      env.HF_MIRROR = 'https://hf-mirror.com';
+      env.TRANSFORMERS_BASE_URL = 'https://hf-mirror.com';
+      
+      // 对模型下载器的支持
+      env.HF_HUB_OFFLINE = '0';
+      env.HF_HUB_DISABLE_TELEMETRY = '1';
+      env.HF_HUB_DISABLE_PROGRESS_BARS = '1';
+      env.HF_HUB_DISABLE_SYMLINKS_WARNING = '1';
+      
+      // 设置本地缓存目录
+      const modelDir = path.join(sdPath, 'models');
+      const huggingfaceDir = path.join(modelDir, 'huggingface');
+      
+      // 确保目录存在
+      if (!fs.existsSync(huggingfaceDir)) {
+        try {
+          fs.mkdirSync(huggingfaceDir, { recursive: true });
+          console.log('[SD] 创建HuggingFace缓存目录:', huggingfaceDir);
+        } catch (err) {
+          console.error('[SD] 创建HuggingFace缓存目录失败:', err);
+        }
+      }
+      
+      env.HUGGINGFACE_HUB_CACHE = huggingfaceDir;
+      env.TRANSFORMERS_CACHE = path.join(huggingfaceDir, 'transformers');
+      
+      // 对特定模型路径的修复
+      env.HF_MODELS_DIR = huggingfaceDir;
+      
+      // 添加clip模型特殊处理
+      console.log('[SD] 设置CLIP模型路径');
+      env.CLIP_MODEL_PATH = path.join(huggingfaceDir, 'openai', 'clip-vit-large-patch14');
+      
+      // 检查CLIP模型是否已经存在
+      const clipTokenizerPath = path.join(huggingfaceDir, 'models--openai--clip-vit-large-patch14');
+      if (fs.existsSync(clipTokenizerPath)) {
+        console.log('[SD] 发现CLIP模型缓存:', clipTokenizerPath);
+      } else {
+        console.warn('[SD] 未找到CLIP模型缓存，可能需要预先下载');
+      }
+      
+      // 设置更多特定路径
+      env.CLIP_MODEL_NAME = 'openai/clip-vit-large-patch14';
+      env.CLIP_MODEL_ROOT = huggingfaceDir;
+      env.TRANSFORMERS_OFFLINE = '0'; // 确保可以在线下载
+      
+      // 为SD模型设置额外路径
+      const sdModelsDir = path.join(modelDir, 'Stable-diffusion');
+      if (!fs.existsSync(sdModelsDir)) {
+        try {
+          fs.mkdirSync(sdModelsDir, { recursive: true });
+        } catch (err) {
+          console.error('[SD] 创建SD模型目录失败:', err);
+        }
+      }
+      env.SD_MODELS_PATH = sdModelsDir;
+      
+      // 设置HuggingFace令牌 - 使用特殊值跳过登录
+      env.HF_TOKEN = 'hf_mirror';
+    }
     
     // 启动进程
     console.log('[SD] 正在启动进程...');
@@ -253,6 +435,9 @@ ${command}
         text = data.toString();
       }
       
+      // 更新心跳时间戳
+      lastHeartbeat = Date.now();
+      
       console.log('[SD] 输出:', text.trim());
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('sd:output', text.trim());
@@ -279,6 +464,9 @@ ${command}
         console.error('[SD] 解码错误输出出错:', error);
         text = data.toString();
       }
+      
+      // 更新心跳时间戳
+      lastHeartbeat = Date.now();
       
       console.error('[SD] 错误:', text.trim());
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -420,6 +608,9 @@ function buildLaunchCommand(options) {
     }
   };
   
+  // 获取 torchConfig
+  const torchConfig = options.torchConfig || config.get('torchConfig') || {};
+  
   // 新的默认启动参数，根据用户需求
   addArg('--medvram-sdxl'); // 为SDXL优化内存
   addArg('--xformers');     // 默认启用xFormers
@@ -429,6 +620,21 @@ function buildLaunchCommand(options) {
   
   // 添加SSL问题解决参数
   addArg('--enable-insecure-extension-access');
+  addArg('--skip-version-check'); // 跳过版本检查，避免网络请求
+  
+  // 添加 Hugging Face 镜像参数 - 实际webui不支持此参数，仅通过环境变量设置
+  // 保留禁用版本检查
+  if (torchConfig && torchConfig.useHfMirror) {
+    // addArg('--hf-mirror-base=https://hf-mirror.com'); // 此参数不存在
+    addArg('--disable-version-check'); // 禁用版本检查，避免网络请求官方源
+    addArg('--no-download'); // 防止下载时出错
+    addArg('--disable-safe-unpickle'); // 禁用安全解析，可能解决某些模型加载失败问题
+    addArg('--opt-channelslast'); // 优化通道顺序
+    addArg('--no-half-vae'); // 防止VAE精度问题
+    // 使用两个单独的参数指定模型目录
+    addArg('--ckpt-dir');
+    addArg('models/Stable-diffusion');
+  }
   
   // 添加API监听参数，允许外部访问
   addArg('--listen');
@@ -439,11 +645,9 @@ function buildLaunchCommand(options) {
   // 添加加速优化参数
   addArg('--precision');
   addArg('full');
-  addArg('--no-half-vae');
   
   // 内存优化参数（缓解模型加载问题）
   addArg('--opt-split-attention');
-  addArg('--opt-channelslast');
   
   // 添加端口参数
   if (options.port) {

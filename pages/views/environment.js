@@ -66,6 +66,28 @@ window.Environment = {
                 </el-select>
               </el-form-item>
               
+              <el-divider content-position="left">网络设置</el-divider>
+              
+              <el-form-item label="Hugging Face镜像">
+                <el-switch v-model="torchConfig.useHfMirror" active-text="使用镜像" inactive-text="官方源" />
+                <div class="setting-help-text">
+                  使用 hf-mirror.com 镜像源以解决国内访问 Hugging Face 慢或无法访问的问题
+                </div>
+                
+                <div class="model-download-actions mt-8" v-if="torchConfig.useHfMirror">
+                  <el-button 
+                    size="small" 
+                    type="primary" 
+                    @click="downloadClipModel"
+                    :disabled="!pythonValid || downloadingClip">
+                    {{ downloadingClip ? '下载中...' : '下载CLIP模型' }}
+                  </el-button>
+                  <div class="setting-help-text">
+                    预先下载CLIP模型到本地，解决模型加载失败问题
+                  </div>
+                </div>
+              </el-form-item>
+
               <el-form-item>
                 <el-button type="primary" @click="installPytorch" :disabled="!pythonValid || installingPytorch">
                   {{ installingPytorch ? '安装中...' : '安装PyTorch' }}
@@ -150,6 +172,62 @@ window.Environment = {
           </el-card>
         </el-col>
       </el-row>
+      
+      <!-- 故障排除指南 -->
+      <el-row :gutter="16" class="mt-16">
+        <el-col :span="24">
+          <el-card class="setting-card" shadow="hover">
+            <template #header>
+              <div class="card-header">
+                <h3>常见问题排除</h3>
+              </div>
+            </template>
+            
+            <el-collapse accordion>
+              <el-collapse-item title="SSL连接问题" name="ssl-issues">
+                <div class="troubleshoot-content">
+                  <p><strong>症状：</strong>出现 <code>SSLError</code> 或 <code>SSL: UNEXPECTED_EOF_WHILE_READING</code> 错误</p>
+                  <p><strong>解决方案：</strong></p>
+                  <ol>
+                    <li>启用<strong>Hugging Face镜像源</strong>，使用国内镜像替代官方源</li>
+                    <li>检查系统时间是否正确，不正确的系统时间会导致SSL证书验证失败</li>
+                    <li>尝试在系统环境变量中添加：
+                      <pre>CURL_CA_BUNDLE=""
+SSL_CERT_FILE=""
+REQUESTS_CA_BUNDLE=""</pre>
+                    </li>
+                  </ol>
+                </div>
+              </el-collapse-item>
+              
+              <el-collapse-item title="模型下载问题" name="model-download">
+                <div class="troubleshoot-content">
+                  <p><strong>症状：</strong>模型下载失败或速度极慢</p>
+                  <p><strong>解决方案：</strong></p>
+                  <ol>
+                    <li>启用<strong>Hugging Face镜像源</strong>，使用国内镜像加速下载</li>
+                    <li>使用<strong>下载CLIP模型</strong>按钮预先下载基础模型</li>
+                    <li>下载完成后重启SD服务</li>
+                  </ol>
+                </div>
+              </el-collapse-item>
+              
+              <el-collapse-item title="CLIP模型加载失败" name="clip-model-error">
+                <div class="troubleshoot-content">
+                  <p><strong>症状：</strong>出现 <code>Can't load tokenizer for 'openai/clip-vit-large-patch14'</code> 错误</p>
+                  <p><strong>解决方案：</strong></p>
+                  <ol>
+                    <li>启用<strong>Hugging Face镜像源</strong></li>
+                    <li>点击<strong>下载CLIP模型</strong>按钮预先下载基础模型</li>
+                    <li>确保网络连接正常或使用代理</li>
+                    <li>如果仍然失败，可能需要手动下载模型文件并放入正确位置</li>
+                  </ol>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </el-card>
+        </el-col>
+      </el-row>
     </div>
   `,
   
@@ -161,9 +239,11 @@ window.Environment = {
     const torchStatus = window.Vue.ref(null);
     const venvLoading = window.Vue.ref(true);
     const venvList = window.Vue.ref([]);
+    const downloadingClip = window.Vue.ref(false);
     
     const torchConfig = window.Vue.reactive({
-      cuda: 'cuda118'
+      cuda: 'cuda118',
+      useHfMirror: false
     });
 
     const systemInfo = window.Vue.reactive({
@@ -194,7 +274,12 @@ window.Environment = {
 
         const savedTorchConfig = await window.electron.config.get('torchConfig');
         if (savedTorchConfig) {
+          console.log('已加载torchConfig设置:', savedTorchConfig);
           Object.assign(torchConfig, savedTorchConfig);
+        } else {
+          // 如果没有保存过配置，立即保存默认配置
+          console.log('未找到torchConfig设置，保存默认配置');
+          await window.electron.config.set('torchConfig', { ...torchConfig });
         }
 
         // 加载系统信息
@@ -509,10 +594,126 @@ window.Environment = {
         installingPytorch.value = false;
       }
     };
+
+    // 下载CLIP模型
+    const downloadClipModel = async () => {
+      if (!pythonValid.value || downloadingClip.value) return;
+      
+      downloadingClip.value = true;
+      try {
+        ElementPlus.ElMessage.info('开始下载CLIP模型，这可能需要几分钟时间...');
+        
+        const result = await window.electron.pythonEnv.runPythonScript(pythonPath.value, `
+import os
+import sys
+import huggingface_hub
+import json
+import shutil
+from pathlib import Path
+
+# 设置环境变量
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["TRANSFORMERS_BASE_URL"] = "https://hf-mirror.com"
+os.environ["CURL_CA_BUNDLE"] = ""
+os.environ["SSL_CERT_FILE"] = ""
+os.environ["REQUESTS_CA_BUNDLE"] = ""
+
+try:
+    print("开始下载CLIP模型...")
+    
+    # 确保需要的软件包已安装
+    try:
+        from transformers import CLIPTokenizer, CLIPTextModel
+    except ImportError:
+        print("安装必要的软件包...")
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "transformers", "torch", "huggingface_hub"])
+        from transformers import CLIPTokenizer, CLIPTextModel
+    
+    # 先下载分词器
+    print("下载分词器...")
+    tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+    
+    print("下载文本模型...")
+    text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
+    
+    # 获取缓存目录
+    cache_dir = huggingface_hub.constants.HF_HUB_CACHE
+    print(f"模型保存在: {cache_dir}")
+    
+    # 查找已下载的模型目录
+    model_dir = None
+    for dir_path in Path(cache_dir).glob("models--openai--clip-vit-large-patch14*"):
+        if dir_path.is_dir():
+            model_dir = dir_path
+            break
+    
+    if model_dir is None:
+        print("未找到下载的模型目录!")
+        sys.exit(1)
+    
+    print(f"找到模型目录: {model_dir}")
+    
+    # 创建一个config.json文件，SD Web UI可能会查找它
+    config_path = os.path.join(model_dir, "config.json")
+    if not os.path.exists(config_path):
+        basic_config = {
+            "architectures": ["CLIPTextModel"],
+            "model_type": "clip",
+            "projection_dim": 768,
+            "text_config": {
+                "hidden_size": 768,
+                "intermediate_size": 3072,
+                "num_attention_heads": 12,
+                "num_hidden_layers": 12
+            }
+        }
+        with open(config_path, "w") as f:
+            json.dump(basic_config, f, indent=2)
+        print(f"创建了config.json: {config_path}")
+    
+    print("模型下载完成！")
+    sys.exit(0)
+except Exception as e:
+    print(f"下载失败: {str(e)}")
+    sys.exit(1)
+        `);
+        
+        if (result.exitCode === 0) {
+          ElementPlus.ElMessage.success('CLIP模型下载成功');
+        } else {
+          ElementPlus.ElMessage.error(`CLIP模型下载失败: ${result.stderr}`);
+        }
+      } catch (error) {
+        console.error('下载CLIP模型失败:', error);
+        ElementPlus.ElMessage.error('下载CLIP模型失败');
+      } finally {
+        downloadingClip.value = false;
+      }
+    };
     
     // 组件挂载时
     window.Vue.onMounted(() => {
       loadSettings();
+    });
+    
+    // 监听离线模式变化
+    window.Vue.watch(offlineMode, async (newValue) => {
+      try {
+        await window.electron.config.set('offlineMode', newValue);
+      } catch (error) {
+        console.error('保存离线模式设置失败:', error);
+      }
+    });
+    
+    // 监听torchConfig中的useHfMirror变化
+    window.Vue.watch(() => torchConfig.useHfMirror, async (newValue) => {
+      try {
+        console.log('保存 Hugging Face 镜像设置:', newValue);
+        await window.electron.config.set('torchConfig', { ...torchConfig });
+      } catch (error) {
+        console.error('保存 Hugging Face 镜像设置失败:', error);
+      }
     });
     
     return {
@@ -526,6 +727,7 @@ window.Environment = {
       systemInfo,
       venvList,
       venvLoading,
+      downloadingClip,
       selectPythonPath,
       checkPythonVersion,
       installPackage,
@@ -533,7 +735,8 @@ window.Environment = {
       installPytorch,
       createVenv,
       activateVenv,
-      deleteVenv
+      deleteVenv,
+      downloadClipModel
     };
   }
 };
@@ -616,6 +819,42 @@ environmentStyle.textContent = `
     display: flex;
     justify-content: center;
     align-items: center;
+  }
+  
+  .troubleshoot-content {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  
+  .troubleshoot-content p {
+    margin: 8px 0;
+  }
+  
+  .troubleshoot-content code {
+    background-color: #f5f7fa;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: monospace;
+  }
+  
+  .troubleshoot-content pre {
+    background-color: #f5f7fa;
+    padding: 8px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-family: monospace;
+    margin: 8px 0;
+  }
+  
+  .troubleshoot-content ol, .troubleshoot-content ul {
+    padding-left: 20px;
+  }
+  
+  .setting-help-text {
+    font-size: 12px;
+    color: #909399;
+    margin-top: 4px;
+    line-height: 1.4;
   }
   
   @media (max-width: 768px) {
