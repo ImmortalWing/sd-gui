@@ -168,93 +168,109 @@ function buildLaunchCommand(options) {
     scriptName = 'launch.py';
   }
   
-  // 构建启动参数
-  const launchArgs = [];
+  // 使用Set来防止参数重复
+  const uniqueArgsSet = new Set();
+  
+  // 添加参数到集合中，确保不重复
+  const addArg = (arg) => {
+    if (!uniqueArgsSet.has(arg)) {
+      uniqueArgsSet.add(arg);
+    }
+  };
+  
+  // 新的默认启动参数，根据用户需求
+  addArg('--medvram-sdxl'); // 为SDXL优化内存
+  addArg('--xformers');     // 默认启用xFormers
+  addArg('--api');          // 启用API
+  addArg('--autolaunch');   // 自动启动浏览器
+  addArg('--skip-python-version-check'); // 跳过Python版本检查
   
   // 添加SSL问题解决参数
-  launchArgs.push('--enable-insecure-extension-access');
-  
-  // 添加API参数
-  launchArgs.push('--api');
+  addArg('--enable-insecure-extension-access');
   
   // 添加API监听参数，允许外部访问
-  launchArgs.push('--listen');
+  addArg('--listen');
   
   // 添加no-half参数，解决某些模型加载问题
-  launchArgs.push('--no-half');
+  addArg('--no-half');
   
   // 添加加速优化参数
-  launchArgs.push('--precision', 'full');
-  launchArgs.push('--no-half-vae');
+  addArg('--precision');
+  addArg('full');
+  addArg('--no-half-vae');
   
   // 内存优化参数（缓解模型加载问题）
-  launchArgs.push('--opt-split-attention');
-  launchArgs.push('--opt-channelslast');
+  addArg('--opt-split-attention');
+  addArg('--opt-channelslast');
   
   // 添加端口参数
   if (options.port) {
-    launchArgs.push(`--port=${options.port}`);
+    addArg(`--port=${options.port}`);
   }
   
-  // 低显存模式
+  // 低显存模式 - 不再添加默认的--medvram，因为我们已经添加了--medvram-sdxl
   if (options.lowVram) {
-    launchArgs.push('--lowvram');
-  } else {
-    // 如果不是低显存模式，默认使用中等显存优化
-    launchArgs.push('--medvram');
+    addArg('--lowvram');
   }
   
-  // 启用xFormers
-  if (options.enableXformers) {
-    launchArgs.push('--xformers');
+  // 由于默认已添加xformers，只检查是否明确禁用
+  if (options.enableXformers === false) {
+    // 从参数集合中移除xformers选项
+    uniqueArgsSet.delete('--xformers');
   }
   
   // 使用特定模型
   if (options.model) {
-    launchArgs.push(`--ckpt=${options.model}`);
+    addArg(`--ckpt=${options.model}`);
   }
   
-  // 自动启动浏览器
+  // 自动启动浏览器 - 由于默认已添加autolaunch，只在明确禁用时添加nowebui
   if (options.autoLaunchBrowser === false) {
-    launchArgs.push('--nowebui');
+    // 从参数集合中移除autolaunch选项
+    uniqueArgsSet.delete('--autolaunch');
+    addArg('--nowebui');
   }
   
   // 离线模式
   if (options.offlineMode) {
-    launchArgs.push('--skip-torch-cuda-test');
-    launchArgs.push('--disable-safe-unpickle');
-    launchArgs.push('--skip-python-version-check');
-    launchArgs.push('--no-download-sd-model');
-    launchArgs.push('--skip-version-check');
+    addArg('--skip-torch-cuda-test');
+    addArg('--disable-safe-unpickle');
+    addArg('--skip-python-version-check');
+    addArg('--no-download-sd-model');
+    addArg('--skip-version-check');
     // 增加额外的离线参数
-    launchArgs.push('--no-half-vae');
-    launchArgs.push('--no-download');
-    launchArgs.push('--no-hashing');
+    addArg('--no-half-vae');
+    addArg('--no-download');
+    addArg('--no-hashing');
     // 添加解决CLIP tokenizer问题的参数
-    launchArgs.push('--use-cpu all');
-    launchArgs.push('--disable-nan-check');
-    launchArgs.push('--opt-sub-quad-attention');
-    launchArgs.push('--opt-channelslast');
-    launchArgs.push('--no-verify-input');
+    addArg('--use-cpu');
+    addArg('all');
+    addArg('--disable-nan-check');
+    addArg('--opt-sub-quad-attention');
+    addArg('--no-verify-input');
   }
   
   // 单独的离线选项
   if (options.skipTorchCudaTest) {
-    launchArgs.push('--skip-torch-cuda-test');
+    addArg('--skip-torch-cuda-test');
   }
   
   if (options.skipPythonCheck) {
-    launchArgs.push('--skip-python-version-check');
+    addArg('--skip-python-version-check');
   }
   
   if (options.noDownloadModels) {
-    launchArgs.push('--no-download-sd-model');
+    addArg('--no-download-sd-model');
   }
   
-  // 其他自定义参数
+  // 其他自定义参数，先进行拆分，再逐个添加，防止重复
   if (options.customArgs) {
-    launchArgs.push(...options.customArgs.split(' '));
+    const customArgsList = options.customArgs.split(' ').filter(arg => arg.trim() !== '');
+    customArgsList.forEach(arg => addArg(arg));
   }
+  
+  // 转换Set为数组
+  const launchArgs = Array.from(uniqueArgsSet);
   
   // 获取自定义Python路径
   const customPythonPath = config.get('pythonPath');
@@ -274,6 +290,27 @@ function buildLaunchCommand(options) {
     } else {
       // 使用系统默认的python命令
       pythonExe = 'python';
+    }
+    
+    // 检查Python路径是否有效
+    if (customPythonPath && !fs.existsSync(customPythonPath)) {
+      console.warn(`[SD] 警告: 自定义Python路径 "${customPythonPath}" 不存在，将使用系统默认Python`);
+      pythonExe = 'python';
+    }
+    
+    // 验证SD目录是否存在
+    try {
+      if (!fs.existsSync(sdPath)) {
+        throw new Error(`SD路径 "${sdPath}" 不存在`);
+      }
+      
+      const launchPyPath = path.join(sdPath, scriptName);
+      if (!fs.existsSync(launchPyPath)) {
+        throw new Error(`启动脚本 "${launchPyPath}" 不存在`);
+      }
+    } catch (pathError) {
+      console.error('[SD] 路径验证失败:', pathError);
+      throw pathError;
     }
     
     command = `cd "${sdPath}" && ${pythonExe} "${path.join(sdPath, scriptName)}" ${launchArgs.join(' ')}`;
@@ -382,14 +419,14 @@ async function launchStableDiffusion(options = {}) {
       pythonPath: options.pythonPath || config.get('pythonPath'),
       port: options.port || 7860,
       lowVram: !!options.lowVram,
-      enableXformers: !!options.enableXformers,
+      enableXformers: options.enableXformers !== false, // 默认启用xFormers，除非明确禁用
       model: options.model,
-      autoLaunchBrowser: options.autoLaunchBrowser !== false,
-      customArgs: options.customArgs || '',
-      offlineMode: !!options.offlineMode,
-      skipTorchCudaTest: !!options.skipTorchCudaTest,
-      skipPythonCheck: !!options.skipPythonCheck,
-      noDownloadModels: !!options.noDownloadModels
+      autoLaunchBrowser: options.autoLaunchBrowser !== false, // 默认启用，除非明确禁用
+      customArgs: options.customArgs || '--medvram-sdxl', // 默认使用SDXL优化
+      offlineMode: options.offlineMode !== false, // 默认启用
+      skipTorchCudaTest: options.skipTorchCudaTest !== false, // 默认启用
+      skipPythonCheck: options.skipPythonCheck !== false, // 默认启用
+      noDownloadModels: options.noDownloadModels !== false // 默认启用
     };
     
     console.log('[SD] 清理后的选项:', JSON.stringify(cleanOptions));
@@ -445,7 +482,9 @@ async function launchStableDiffusion(options = {}) {
         windowsHide: false,
         env: Object.assign({}, process.env, { 
           PYTHONIOENCODING: 'utf-8',
-          PYTHONUNBUFFERED: '1'  // 禁用Python输出缓冲
+          PYTHONUNBUFFERED: '1',  // 禁用Python输出缓冲
+          LANG: 'zh_CN.UTF-8',    // 添加中文支持
+          LC_ALL: 'zh_CN.UTF-8'   // 添加中文支持
         })
       });
     } catch (spawnError) {

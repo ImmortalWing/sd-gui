@@ -166,9 +166,9 @@ window.Home = {
     const launchOptions = window.Vue.reactive({
       port: 7860,
       lowVram: false,
-      enableXformers: true,
+      enableXformers: true,  // 默认启用xFormers
       autoLaunchBrowser: true,
-      customArgs: '--medvram --opt-split-attention',  // 添加medvram和优化参数
+      customArgs: '--medvram-sdxl',  // 更新为用户要求的默认参数
       model: '',
       offlineMode: true,  // 默认开启离线模式
       skipTorchCudaTest: true,  // 跳过CUDA测试
@@ -208,84 +208,22 @@ window.Home = {
       }
     };
     
-    // 启动SD
+    // 启动SD - 现在更加清晰的启动函数，可以被其他页面重用
     const handleLaunch = async () => {
-      if (sdPath.value === '') {
-        ElMessage.warning('请先配置Stable Diffusion路径');
-        return;
-      }
-      
-      isLoading.value = true;
-      logs.value = '';
-      // 保留错误日志，只添加分隔线
-      errorLogs.value += '\n------------- 新启动会话 --------------\n\n';
-      
-      try {
-        // 先检查路径是否存在
-        try {
-          const pathCheckResult = await window.electron.config.setSdPath(sdPath.value);
-          if (!pathCheckResult.success) {
-            ElMessage.error(`SD路径无效: ${pathCheckResult.error || '请检查路径是否存在'}`);
-            isLoading.value = false;
-            return;
-          }
-        } catch (pathError) {
-          console.error('检查SD路径失败:', pathError);
-          ElMessage.error(`检查SD路径失败: ${pathError.message}`);
-          isLoading.value = false;
-          return;
-        }
-        
-        // 创建一个简单的纯对象，避免传递复杂的响应式对象
-        const options = {
-          sdPath: sdPath.value, // 确保传递sdPath
-          port: launchOptions.port,
-          lowVram: launchOptions.lowVram,
-          enableXformers: launchOptions.enableXformers,
-          autoLaunchBrowser: launchOptions.autoLaunchBrowser,
-          customArgs: launchOptions.customArgs || '',
-          model: launchOptions.model || '',
-          offlineMode: launchOptions.offlineMode,
-          skipTorchCudaTest: launchOptions.skipTorchCudaTest,
-          skipPythonCheck: launchOptions.skipPythonCheck,
-          noDownloadModels: launchOptions.noDownloadModels
-        };
-        
-        console.log('启动选项:', options);
-        
-        // 使用sdLauncher.launch发送纯对象
-        const result = await window.electron.sdLauncher.launch(options);
-        
-        if (result && result.success) {
-          ElMessage.success('正在启动Stable Diffusion服务');
+      // 调用共享的启动函数
+      await window.launchSdService(sdPath.value, launchOptions, {
+        onLoading: (isLoading) => {
+          isLoading.value = isLoading;
+        },
+        onSuccess: (port) => {
           isRunning.value = true;
-          port.value = launchOptions.port;
-        } else {
-          // 显示更详细的错误信息
-          const errorMessage = result && result.error ? result.error : '未知错误';
-          console.error('启动失败:', errorMessage);
-          ElMessage.error(`启动失败: ${errorMessage}`);
-          
-          // 如果有特定的错误，给出建议
-          if (errorMessage.includes('CUDA') || errorMessage.includes('显存')) {
-            ElMessage.warning('提示: 尝试启用"低VRAM模式"可能会解决显存不足问题');
-          } else if (errorMessage.includes('Python')) {
-            ElMessage.warning('提示: 检查Python路径是否正确，或在设置中指定Python解释器路径');
-          } else if (errorMessage.includes('找不到') || errorMessage.includes('无效')) {
-            ElMessage.warning('提示: 请检查SD安装路径是否正确');
-          }
+          port.value = port;
+        },
+        onClearLogs: () => {
+          logs.value = '';
+          errorLogs.value += '\n------------- 新启动会话 --------------\n\n';
         }
-      } catch (error) {
-        console.error('启动失败:', error);
-        ElMessage.error(`启动失败: ${error.message}`);
-        
-        // 根据错误类型给出建议
-        if (error.message.includes('timeout') || error.message.includes('超时')) {
-          ElMessage.warning('提示: 启动超时可能是系统资源不足，尝试关闭其他程序后重试');
-        }
-      } finally {
-        isLoading.value = false;
-      }
+      });
     };
     
     // 停止SD
@@ -408,6 +346,147 @@ window.Home = {
     window.Vue.onMounted(() => {
       loadConfig();
       setupListeners();
+      
+      // 创建全局启动函数，可供其他组件调用
+      if (!window.launchSdService) {
+        window.launchSdService = async (sdPath, options, callbacks = {}) => {
+          const { onLoading, onSuccess, onClearLogs } = callbacks;
+          
+          if (!sdPath) {
+            console.error('[SD GUI] 错误: SD路径未设置');
+            ElMessage.warning('请先配置Stable Diffusion路径');
+            return { success: false, error: '未配置Stable Diffusion路径' };
+          }
+          
+          console.log('[SD GUI] 启动SD服务，路径:', sdPath);
+          console.log('[SD GUI] 启动选项:', JSON.stringify(options));
+          
+          // 检查路径有效性
+          try {
+            if (!await window.electron.ipcRenderer.invoke('path-exists', sdPath)) {
+              console.error('[SD GUI] 错误: SD路径不存在:', sdPath);
+              ElMessage.error(`SD路径不存在: ${sdPath}`);
+              return { success: false, error: '路径不存在' };
+            }
+            
+            // 检查launch.py或webui.py文件是否存在
+            const launchFileExists = await window.electron.ipcRenderer.invoke('path-exists', 
+              `${sdPath}/launch.py`) || await window.electron.ipcRenderer.invoke('path-exists', `${sdPath}/webui.py`);
+            
+            if (!launchFileExists) {
+              console.error('[SD GUI] 错误: 启动脚本不存在');
+              ElMessage.error('启动脚本不存在，请检查SD安装目录');
+              return { success: false, error: '启动脚本不存在' };
+            }
+          } catch (pathError) {
+            console.error('[SD GUI] 路径检查错误:', pathError);
+          }
+          
+          if (onLoading) onLoading(true);
+          if (onClearLogs) onClearLogs();
+          
+          try {
+            // 先检查路径是否存在
+            try {
+              const pathCheckResult = await window.electron.config.setSdPath(sdPath);
+              if (!pathCheckResult.success) {
+                console.error('[SD GUI] 路径验证失败:', pathCheckResult.error);
+                ElMessage.error(`SD路径无效: ${pathCheckResult.error || '请检查路径是否存在'}`);
+                if (onLoading) onLoading(false);
+                return { success: false, error: '路径无效' };
+              }
+            } catch (pathError) {
+              console.error('[SD GUI] 检查SD路径失败:', pathError);
+              ElMessage.error(`检查SD路径失败: ${pathError.message}`);
+              if (onLoading) onLoading(false);
+              return { success: false, error: pathError.message };
+            }
+            
+            // 创建一个简单的纯对象，避免传递复杂的响应式对象
+            const cleanOptions = {
+              sdPath: sdPath,
+              port: options.port || 7860,
+              lowVram: !!options.lowVram,
+              enableXformers: options.enableXformers !== false, // 默认启用
+              autoLaunchBrowser: options.autoLaunchBrowser !== false, // 默认启用
+              customArgs: options.customArgs || '',
+              model: options.model || '',
+              offlineMode: options.offlineMode !== false, // 默认启用
+              skipTorchCudaTest: options.skipTorchCudaTest !== false, // 默认启用
+              skipPythonCheck: options.skipPythonCheck !== false, // 默认启用
+              noDownloadModels: options.noDownloadModels !== false // 默认启用
+            };
+            
+            console.log('[SD GUI] 处理后的启动选项:', JSON.stringify(cleanOptions));
+            
+            // 使用sdLauncher.launch发送纯对象
+            const result = await window.electron.sdLauncher.launch(cleanOptions);
+            
+            if (result && result.success) {
+              console.log('[SD GUI] 启动命令已发送，等待服务启动');
+              ElMessage.success('正在启动Stable Diffusion服务');
+              if (onSuccess) onSuccess(cleanOptions.port);
+              return { success: true };
+            } else {
+              // 显示更详细的错误信息
+              const errorMessage = result && result.error ? result.error : '未知错误';
+              console.error('[SD GUI] 启动失败:', errorMessage);
+              ElMessage.error(`启动失败: ${errorMessage}`);
+              
+              // 提供详细的故障排除建议
+              if (errorMessage.includes('CUDA') || errorMessage.includes('显存')) {
+                ElMessage.warning('提示: 尝试启用"低VRAM模式"可能会解决显存不足问题');
+                console.log('[SD GUI] 建议: 启用低VRAM模式');
+              } else if (errorMessage.includes('Python')) {
+                ElMessage.warning('提示: 检查Python路径是否正确，或在设置中指定Python解释器路径');
+                console.log('[SD GUI] 建议: 检查Python路径');
+                
+                // 尝试获取系统中可用的Python版本
+                try {
+                  const pythonVersions = await window.electron.ipcRenderer.invoke('get-python-versions');
+                  if (pythonVersions && pythonVersions.length > 0) {
+                    console.log('[SD GUI] 系统可用的Python版本:', pythonVersions);
+                    ElMessage.info(`系统中可用的Python版本: ${pythonVersions.join(', ')}`);
+                  }
+                } catch (pyError) {
+                  console.error('[SD GUI] 获取Python版本失败:', pyError);
+                }
+              } else if (errorMessage.includes('找不到') || errorMessage.includes('无效') || errorMessage.includes('不存在')) {
+                ElMessage.warning('提示: 请检查SD安装路径是否正确');
+                console.log('[SD GUI] 建议: 检查SD安装路径');
+                
+                // 尝试列出指定目录的内容，辅助排查
+                try {
+                  const dirContents = await window.electron.ipcRenderer.invoke('list-directory', sdPath);
+                  if (dirContents) {
+                    console.log(`[SD GUI] ${sdPath} 目录内容:`, dirContents);
+                  }
+                } catch (dirError) {
+                  console.error('[SD GUI] 列出目录内容失败:', dirError);
+                }
+              } else if (errorMessage.includes('乱码') || errorMessage.includes('编码')) {
+                ElMessage.warning('提示: 可能存在字符编码问题，尝试避免路径中使用中文或特殊字符');
+                console.log('[SD GUI] 建议: 避免路径中使用中文或特殊字符');
+              }
+              
+              return { success: false, error: errorMessage };
+            }
+          } catch (error) {
+            console.error('[SD GUI] 启动过程发生异常:', error);
+            ElMessage.error(`启动失败: ${error.message}`);
+            
+            // 根据错误类型给出建议
+            if (error.message.includes('timeout') || error.message.includes('超时')) {
+              ElMessage.warning('提示: 启动超时可能是系统资源不足，尝试关闭其他程序后重试');
+              console.log('[SD GUI] 建议: 释放系统资源，关闭不必要的程序');
+            }
+            
+            return { success: false, error: error.message };
+          } finally {
+            if (onLoading) onLoading(false);
+          }
+        };
+      }
     });
     
     // 组件卸载前

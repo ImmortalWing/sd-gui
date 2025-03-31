@@ -7,6 +7,7 @@ const modelManager = require('./ipcHandlers/modelManager')
 const pythonEnv = require('./ipcHandlers/pythonEnv')
 const { setupIpcHandlers } = require('./apiHandler')
 const remoteMain = require('@electron/remote/main')
+const { exec } = require('child_process')
 
 // 初始化remote模块
 remoteMain.initialize()
@@ -149,135 +150,6 @@ ipcMain.handle('configSdPath', async (event, sdPath) => {
   return { success: true, path: sdPath };
 });
 
-// 处理Python路径配置
-ipcMain.handle('configPythonPath', async (event, pythonPath) => {
-  // 如果没有提供路径，打开文件选择对话框
-  if (!pythonPath) {
-    const { filePaths } = await dialog.showOpenDialog({
-      title: '选择Python解释器',
-      properties: ['openFile'],
-      filters: [
-        { name: 'Python解释器', extensions: ['exe'] },
-        { name: '所有文件', extensions: ['*'] }
-      ]
-    });
-    
-    if (filePaths && filePaths.length > 0) {
-      pythonPath = filePaths[0];
-    } else {
-      return { success: false, error: '未选择Python解释器' };
-    }
-  }
-  
-  console.log('验证Python路径:', pythonPath);
-  
-  // 验证路径
-  if (!fs.existsSync(pythonPath)) {
-    console.log('Python路径不存在');
-    return { success: false, error: '路径不存在' };
-  }
-  
-  // 检查是否有效的Python解释器
-  try {
-    const { exec } = require('child_process');
-    console.log('执行Python版本检查命令...');
-    
-    const version = await new Promise((resolve, reject) => {
-      // 设置超时
-      const timeout = setTimeout(() => {
-        reject(new Error('执行超时'));
-      }, 5000);
-      
-      exec(`"${pythonPath}" --version`, (error, stdout, stderr) => {
-        clearTimeout(timeout);
-        
-        if (error) {
-          // 如果是Windows系统，可能是Python解释器需要管理员权限
-          if (process.platform === 'win32') {
-            console.warn('Python版本检查失败，但允许继续:', error);
-            resolve('Python (权限验证失败)');
-            return;
-          }
-          
-          console.error('Python版本检查失败:', error);
-          reject(error);
-          return;
-        }
-        
-        const output = stdout.trim() || stderr.trim();
-        console.log('Python版本检查结果:', output);
-        resolve(output);
-      });
-    });
-    
-    // 检查输出是否包含Python字样
-    const isPython = version.toLowerCase().includes('python');
-    
-    if (!isPython) {
-      // 如果是.exe文件但没找到Python字样，可能是权限问题或特殊版本
-      if (process.platform === 'win32' && pythonPath.toLowerCase().endsWith('.exe')) {
-        console.warn('可能是Python解释器但版本验证失败');
-        
-        // 确认用户是否要使用该路径
-        const { response } = await dialog.showMessageBox({
-          type: 'warning',
-          title: 'Python验证警告',
-          message: '无法确认所选文件是否为Python解释器',
-          detail: '您仍然可以使用此文件，但无法保证它能正常工作。是否继续使用？',
-          buttons: ['继续使用', '取消'],
-          defaultId: 1,
-          cancelId: 1
-        });
-        
-        if (response === 0) {
-          // 用户选择继续使用
-          config.set('pythonPath', pythonPath);
-          return { success: true, path: pythonPath, warning: true };
-        } else {
-          // 用户取消
-          return { success: false, error: '用户取消了验证' };
-        }
-      }
-      
-      console.log('不是有效的Python解释器');
-      return { success: false, error: '不是有效的Python解释器' };
-    }
-    
-    // 保存配置
-    console.log('保存Python路径配置:', pythonPath);
-    config.set('pythonPath', pythonPath);
-    return { success: true, path: pythonPath, version };
-  } catch (error) {
-    console.error('验证Python解释器失败:', error);
-    
-    // 如果是Windows系统且是.exe文件，可能只是权限问题
-    if (process.platform === 'win32' && pythonPath.toLowerCase().endsWith('.exe')) {
-      // 确认用户是否要使用该路径
-      try {
-        const { response } = await dialog.showMessageBox({
-          type: 'warning',
-          title: 'Python验证警告',
-          message: '无法验证Python解释器',
-          detail: `验证失败: ${error.message}\n\n如果您确定这是Python解释器，可以继续使用。`,
-          buttons: ['继续使用', '取消'],
-          defaultId: 1,
-          cancelId: 1
-        });
-        
-        if (response === 0) {
-          // 用户选择继续使用
-          config.set('pythonPath', pythonPath);
-          return { success: true, path: pythonPath, warning: true };
-        }
-      } catch (dialogError) {
-        console.error('显示确认对话框失败:', dialogError);
-      }
-    }
-    
-    return { success: false, error: '无法验证Python解释器: ' + error.message };
-  }
-});
-
 // 处理模型文件列表请求
 ipcMain.handle('listModelFiles', async () => {
   try {
@@ -315,6 +187,66 @@ ipcMain.handle('deleteModel', async (event, fileName) => {
     throw error;
   }
 });
+
+// 新增的IPC处理器
+ipcMain.handle('path-exists', async (event, filePath) => {
+  try {
+    return fs.existsSync(filePath);
+  } catch (error) {
+    console.error('检查路径是否存在失败:', error);
+    return false;
+  }
+});
+
+ipcMain.handle('list-directory', async (event, dirPath) => {
+  try {
+    if (!fs.existsSync(dirPath)) {
+      return { success: false, error: '目录不存在' };
+    }
+    
+    const files = fs.readdirSync(dirPath);
+    return { success: true, files };
+  } catch (error) {
+    console.error('列出目录内容失败:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-python-versions', async () => {
+  try {
+    const pythonCommands = ['python', 'python3', 'py'];
+    const versions = [];
+    
+    for (const cmd of pythonCommands) {
+      try {
+        const { stdout } = await execPromise(`${cmd} --version`);
+        if (stdout) {
+          versions.push(stdout.trim());
+        }
+      } catch (err) {
+        // 忽略失败的命令
+      }
+    }
+    
+    return versions;
+  } catch (error) {
+    console.error('获取Python版本失败:', error);
+    return [];
+  }
+});
+
+// 辅助函数：Promise化的exec
+function execPromise(command) {
+  return new Promise((resolve, reject) => {
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
 
 // 设置IPC处理器
 setupIpcHandlers(ipcMain)

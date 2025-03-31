@@ -328,13 +328,7 @@ window.Txt2Img = {
               }
             ).then(() => {
               // 用户点击启动，尝试启动SD服务
-              window.electron.ipcRenderer.invoke('sd:launch').then(launchResult => {
-                if (launchResult.success) {
-                  ElementPlus.ElMessage.success('正在启动SD服务，请稍候...');
-                } else {
-                  ElementPlus.ElMessage.error('启动SD服务失败: ' + launchResult.error);
-                }
-              });
+              startSDService();
             }).catch(() => {
               // 用户取消启动
             });
@@ -420,16 +414,43 @@ window.Txt2Img = {
     // 启动SD服务
     const startSDService = async () => {
       try {
-        const result = await window.electron.ipcRenderer.invoke('sd:launch');
+        // 获取当前SD路径
+        const sdPath = await window.electron.config.get('sdPath');
+        if (!sdPath) {
+          ElementPlus.ElMessage.warning('请先在设置页面配置Stable Diffusion路径');
+          return;
+        }
         
-        if (result.success) {
-          ElementPlus.ElMessage.success('正在启动SD服务，请稍候...');
+        // 使用全局共享的启动函数
+        if (window.launchSdService) {
+          generating.value = true;
+          const result = await window.launchSdService(sdPath, {
+            // 可以传递特定的启动选项，但默认使用全局配置
+            // 例如，如果想使用特定模型：
+            model: selectedModel.value || ''
+          }, {
+            onLoading: (isLoading) => {
+              generating.value = isLoading;
+            }
+          });
+          
+          if (!result.success) {
+            generating.value = false;
+          }
         } else {
-          ElementPlus.ElMessage.error('启动SD服务失败: ' + result.error);
+          // 后备方案：直接调用API（但应该不会执行到这里）
+          const result = await window.electron.ipcRenderer.invoke('sd:launch');
+          
+          if (result.success) {
+            ElementPlus.ElMessage.success('正在启动SD服务，请稍候...');
+          } else {
+            ElementPlus.ElMessage.error('启动SD服务失败: ' + result.error);
+          }
         }
       } catch (error) {
         console.error('启动SD服务失败:', error);
         ElementPlus.ElMessage.error('启动SD服务失败');
+        generating.value = false;
       }
     };
     

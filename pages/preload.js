@@ -75,7 +75,7 @@ if (isElectron && contextBridge && ipcRenderer) {
       get: (key) => ipcRenderer.invoke('getConfig', key),
       set: (key, value) => ipcRenderer.invoke('setConfig', key, value),
       setSdPath: (path) => ipcRenderer.invoke('configSdPath', path),
-      setPythonPath: (path) => ipcRenderer.invoke('configPythonPath', path),
+      setPythonPath: () => ipcRenderer.invoke('pythonEnv:selectPath'),
       validate: (config) => ipcRenderer.invoke('validateConfig', config),
       backup: () => ipcRenderer.invoke('backupConfig'),
       restore: (timestamp) => ipcRenderer.invoke('restoreConfig', timestamp),

@@ -384,20 +384,12 @@ window.Settings = {
         });
         
         console.log('开始选择Python路径...');
-        const result = await window.electron.config.setPythonPath();
+        const result = await window.electron.pythonEnv.selectPythonPath();
         console.log('选择Python路径结果:', result);
         
         if (result && result.success) {
           pythonPath.value = result.path;
-          pythonPathValid.value = true;
-          pythonPathError.value = '';
-          pythonPathWarning.value = result.warning || false;
-          
-          if (result.warning) {
-            ElementPlus.ElMessage.warning('Python路径已设置，但有警告');
-          } else {
-            ElementPlus.ElMessage.success('Python路径设置成功');
-          }
+          await validatePythonPath();
         } else if (result && !result.success) {
           if (result.canceled) {
             // 用户取消了选择，不显示错误
@@ -438,18 +430,15 @@ window.Settings = {
         });
         
         console.log('开始验证Python路径:', pythonPath.value);
-        const result = await window.electron.config.setPythonPath(pythonPath.value);
+        const result = await window.electron.pythonEnv.checkPythonVersion(pythonPath.value);
         console.log('验证Python路径结果:', result);
         
         pythonPathValid.value = result.success;
         
         if (result.success) {
           pythonPathError.value = '';
-          pythonPathWarning.value = result.warning || false;
-          
-          if (result.warning) {
-            ElementPlus.ElMessage.warning('Python路径已验证，但有警告');
-          }
+          pythonPathWarning.value = false;
+          ElementPlus.ElMessage.success(`检测到Python ${result.version}`);
         } else {
           pythonPathError.value = result.error || '路径无效';
           pythonPathWarning.value = false;
