@@ -244,6 +244,19 @@ app.whenReady().then(() => {
     process.env.LANG = 'zh_CN.UTF-8';
     process.env.LC_ALL = 'zh_CN.UTF-8';
     
+    // 通过注册表设置控制台代码页
+    try {
+      exec('REG ADD "HKCU\\Console" /v CodePage /t REG_DWORD /d 65001 /f', (error) => {
+        if (error) {
+          console.error('设置控制台代码页注册表失败:', error);
+        } else {
+          console.log('控制台代码页注册表已设置为UTF-8');
+        }
+      });
+    } catch (error) {
+      console.error('执行注册表命令失败:', error);
+    }
+    
     // 运行命令设置控制台代码页
     exec('chcp 65001', (error) => {
       if (error) {

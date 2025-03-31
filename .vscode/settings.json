@@ -3,15 +3,23 @@
   "terminal.integrated.profiles.windows": {
     "Command Prompt": {
       "path": "C:\\Windows\\System32\\cmd.exe",
-      "args": ["/K", "chcp 65001"],
+      "args": ["/K", "chcp 65001>nul && set PYTHONIOENCODING=utf-8"],
       "icon": "terminal-cmd"
+    },
+    "PowerShell": {
+      "source": "PowerShell",
+      "args": ["-NoExit", "-Command", "chcp 65001>$null; $OutputEncoding = [System.Text.Encoding]::UTF8"]
     }
   },
   "terminal.integrated.env.windows": {
     "PYTHONIOENCODING": "utf-8",
-    "LANG": "zh_CN.UTF-8"
+    "LANG": "zh_CN.UTF-8",
+    "LC_ALL": "zh_CN.UTF-8"
   },
   "files.encoding": "utf8",
   "files.autoGuessEncoding": true,
-  "terminal.integrated.fontFamily": "Consolas, 'Microsoft YaHei', monospace"
+  "terminal.integrated.fontFamily": "Consolas, 'Microsoft YaHei', monospace",
+  "terminal.integrated.allowChords": true,
+  "terminal.integrated.shellIntegration.enabled": true,
+  "terminal.integrated.minimumContrastRatio": 1
 } 

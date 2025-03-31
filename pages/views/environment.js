@@ -254,8 +254,16 @@ window.Environment = {
       try {
         const result = await window.electron.pythonEnv.activateVenv(venv.path);
         if (result && result.success) {
-          ElementPlus.ElMessage.success(`已激活 ${venv.name}`);
+          ElementPlus.ElMessage.success('虚拟环境已激活');
+          pythonPath.value = result.pythonPath;
+          pythonValid.value = true;
+          pythonVersion.value = result.version || '';
+          
+          // 将激活的虚拟环境Python路径保存为environmentPythonPath配置项
+          await window.electron.config.set('environmentPythonPath', result.pythonPath);
+          
           loadVenvList();
+          checkInstalledPackages();
         } else {
           ElementPlus.ElMessage.error('激活虚拟环境失败');
         }
@@ -297,28 +305,63 @@ window.Environment = {
 
     // 选择Python路径
     const selectPythonPath = async () => {
+      let loadingInstance = null;
       try {
+        // 显示加载中
+        loadingInstance = ElementPlus.ElLoading.service({
+          lock: true,
+          text: '验证Python路径中...',
+          background: 'rgba(0, 0, 0, 0.7)'
+        });
+        
+        console.log('开始选择Python路径...');
         const result = await window.electron.pythonEnv.selectPythonPath();
+        console.log('选择Python路径结果:', result);
         
         if (result && result.success) {
           pythonPath.value = result.path;
-          await window.electron.config.set('pythonPath', pythonPath.value);
           await checkPythonVersion();
+          
+          // 将验证通过的路径保存为environmentPythonPath配置项
+          if (pythonValid.value) {
+            await window.electron.config.set('environmentPythonPath', pythonPath.value);
+          }
+        } else if (result && !result.success) {
+          if (result.canceled) {
+            // 用户取消了选择，不显示错误
+            return;
+          }
+          pythonVersion.value = '';
+          pythonValid.value = false;
+          ElementPlus.ElMessage.error(result.error || '路径无效');
         }
       } catch (error) {
-        console.error('选择Python路径失败:', error);
-        ElementPlus.ElMessage.error('选择Python路径失败');
+        console.error('设置Python路径失败:', error);
+        ElementPlus.ElMessage.error('设置Python路径失败');
+      } finally {
+        // 确保加载实例关闭
+        if (loadingInstance) {
+          loadingInstance.close();
+        }
       }
     };
 
     // 检查Python版本
     const checkPythonVersion = async () => {
       if (!pythonPath.value) {
-        pythonValid.value = false;
+        ElementPlus.ElMessage.warning('请先选择Python路径');
         return;
       }
-
+      
+      let loadingInstance = null;
       try {
+        // 显示加载中
+        loadingInstance = ElementPlus.ElLoading.service({
+          lock: true,
+          text: '检查Python版本中...',
+          background: 'rgba(0, 0, 0, 0.7)'
+        });
+        
         const result = await window.electron.pythonEnv.checkPythonVersion(pythonPath.value);
         
         if (result && result.success) {
@@ -326,18 +369,26 @@ window.Environment = {
           pythonVersion.value = result.version;
           ElementPlus.ElMessage.success(`检测到Python ${result.version}`);
           
-          // 检查已安装包
+          // 将验证通过的路径保存为environmentPythonPath配置项
+          await window.electron.config.set('environmentPythonPath', pythonPath.value);
+          
+          // 检查已安装的包
           checkInstalledPackages();
         } else {
           pythonValid.value = false;
           pythonVersion.value = '';
-          ElementPlus.ElMessage.error('Python路径无效');
+          ElementPlus.ElMessage.error(result.error || '无效的Python路径');
         }
       } catch (error) {
         console.error('检查Python版本失败:', error);
         pythonValid.value = false;
         pythonVersion.value = '';
         ElementPlus.ElMessage.error('检查Python版本失败');
+      } finally {
+        // 确保加载实例关闭
+        if (loadingInstance) {
+          loadingInstance.close();
+        }
       }
     };
 

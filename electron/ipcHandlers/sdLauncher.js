@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { config } = require('../config');
 const { execPromise } = require('../utils');
+const iconv = require('iconv-lite');
 
 // 全局变量
 let sdProcess = null;
@@ -109,7 +110,6 @@ async function launchStableDiffusion(options = {}) {
     
     // 获取配置
     const sdPath = options.sdPath || config.get('sdPath');
-    const pythonPath = options.pythonPath || config.get('pythonPath');
     const port = options.port || config.get('port') || 7860;
     const lowVram = options.lowVram !== undefined ? options.lowVram : config.get('lowVram');
     const enableXformers = options.enableXformers !== undefined ? options.enableXformers : config.get('enableXformers');
@@ -129,11 +129,14 @@ async function launchStableDiffusion(options = {}) {
       return { success: false, error: '启动脚本不存在' };
     }
     
+    // 获取环境页面设置的Python解释器路径
+    const pythonPath = config.get('environmentPythonPath');
+    
     // 验证Python路径
     let pythonCommand = 'python';
     if (pythonPath && fs.existsSync(pythonPath)) {
       pythonCommand = pythonPath;
-      console.log('[SD] 使用自定义Python路径:', pythonPath);
+      console.log('[SD] 使用环境页面设置的Python路径:', pythonPath);
     } else if (fs.existsSync(path.join(sdPath, 'venv', 'Scripts', 'python.exe'))) {
       pythonCommand = path.join(sdPath, 'venv', 'Scripts', 'python.exe');
       console.log('[SD] 使用SD内置venv环境');
@@ -230,8 +233,26 @@ ${command}
     
     // 监听输出
     sdProcess.stdout.on('data', (data) => {
-      // 确保数据是UTF-8编码的字符串
-      const text = Buffer.isBuffer(data) ? Buffer.from(data).toString('utf8') : data.toString();
+      // 确保数据是UTF-8编码的字符串，使用iconv-lite解码
+      let text;
+      try {
+        if (Buffer.isBuffer(data)) {
+          // 首先尝试UTF-8解码
+          text = iconv.decode(Buffer.from(data), 'utf8');
+          
+          // 如果解码后仍包含乱码字符，尝试其他编码
+          if (/\uFFFD/.test(text) && process.platform === 'win32') {
+            // 尝试GBK编码(中文Windows默认编码)
+            text = iconv.decode(Buffer.from(data), 'gbk');
+          }
+        } else {
+          text = data.toString();
+        }
+      } catch (error) {
+        console.error('[SD] 解码输出出错:', error);
+        text = data.toString();
+      }
+      
       console.log('[SD] 输出:', text.trim());
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('sd:output', text.trim());
@@ -239,8 +260,26 @@ ${command}
     });
     
     sdProcess.stderr.on('data', (data) => {
-      // 确保数据是UTF-8编码的字符串
-      const text = Buffer.isBuffer(data) ? Buffer.from(data).toString('utf8') : data.toString();
+      // 确保数据是UTF-8编码的字符串，使用iconv-lite解码
+      let text;
+      try {
+        if (Buffer.isBuffer(data)) {
+          // 首先尝试UTF-8解码
+          text = iconv.decode(Buffer.from(data), 'utf8');
+          
+          // 如果解码后仍包含乱码字符，尝试其他编码
+          if (/\uFFFD/.test(text) && process.platform === 'win32') {
+            // 尝试GBK编码(中文Windows默认编码)
+            text = iconv.decode(Buffer.from(data), 'gbk');
+          }
+        } else {
+          text = data.toString();
+        }
+      } catch (error) {
+        console.error('[SD] 解码错误输出出错:', error);
+        text = data.toString();
+      }
+      
       console.error('[SD] 错误:', text.trim());
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('sd:error', text.trim());

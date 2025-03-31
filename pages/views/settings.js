@@ -24,33 +24,6 @@ window.Settings = {
                   <span v-if="sdPathError" class="error-msg">{{ sdPathError }}</span>
                 </div>
               </el-form-item>
-
-              <el-form-item label="模型存储目录">
-                <div class="path-selector">
-                  <el-input v-model="modelsPath" placeholder="请选择模型存储目录" readonly />
-                  <el-button type="primary" @click="selectModelsPath">选择目录</el-button>
-                </div>
-                <div v-if="modelsPath" class="path-info">
-                  <el-tag type="success" size="small">已设置</el-tag>
-                  <el-button type="text" size="small" @click="openModelsFolder">打开目录</el-button>
-                </div>
-              </el-form-item>
-
-              <el-form-item label="Python解释器路径">
-                <div class="path-selector">
-                  <el-input v-model="pythonPath" placeholder="请选择Python解释器（可选）" readonly />
-                  <el-button type="primary" @click="selectPythonPath">选择Python</el-button>
-                </div>
-                <div v-if="pythonPath" class="path-info">
-                  <el-tag type="success" v-if="pythonPathValid && !pythonPathWarning" size="small">有效</el-tag>
-                  <el-tag type="warning" v-if="pythonPathValid && pythonPathWarning" size="small">已设置(有警告)</el-tag>
-                  <el-tag type="danger" v-else-if="!pythonPathValid" size="small">无效</el-tag>
-                  <span v-if="pythonPathError" class="error-msg">{{ pythonPathError }}</span>
-                </div>
-                <div class="path-tip">
-                  <small>如果您的SD版本没有自带Python环境或需要使用特定版本的Python，请配置此项</small>
-                </div>
-              </el-form-item>
             </el-form>
           </el-card>
         </el-col>
@@ -164,11 +137,6 @@ window.Settings = {
     const sdPath = window.Vue.ref('');
     const sdPathValid = window.Vue.ref(false);
     const sdPathError = window.Vue.ref('');
-    const modelsPath = window.Vue.ref('');
-    const pythonPath = window.Vue.ref('');
-    const pythonPathValid = window.Vue.ref(false);
-    const pythonPathError = window.Vue.ref('');
-    const pythonPathWarning = window.Vue.ref(false);
     const uiSettings = window.Vue.reactive({
       theme: 'light',
       autoStart: false
@@ -193,19 +161,6 @@ window.Settings = {
         if (savedSdPath) {
           sdPath.value = savedSdPath;
           await validateSdPath();
-        }
-        
-        // 加载模型路径
-        const savedModelsPath = await window.electron.config.get('modelsPath');
-        if (savedModelsPath) {
-          modelsPath.value = savedModelsPath;
-        }
-        
-        // 加载Python路径
-        const savedPythonPath = await window.electron.config.get('pythonPath');
-        if (savedPythonPath) {
-          pythonPath.value = savedPythonPath;
-          await validatePythonPath();
         }
         
         // 加载UI设置
@@ -315,139 +270,6 @@ window.Settings = {
         console.error('验证SD路径失败:', error);
         sdPathValid.value = false;
         sdPathError.value = '验证失败: ' + error.message;
-      } finally {
-        // 确保加载实例关闭
-        if (loadingInstance) {
-          loadingInstance.close();
-        }
-      }
-    };
-    
-    // 选择模型目录
-    const selectModelsPath = async () => {
-      let loadingInstance = null;
-      try {
-        // 显示加载中
-        loadingInstance = ElementPlus.ElLoading.service({
-          lock: true,
-          text: '设置路径中...',
-          background: 'rgba(0, 0, 0, 0.7)'
-        });
-        
-        const result = await window.electron.modelManager.configDir();
-        
-        if (result && result.success) {
-          modelsPath.value = result.path;
-          ElementPlus.ElMessage.success('模型路径设置成功');
-        } else if (result && !result.success) {
-          if (result.canceled) {
-            // 用户取消了选择，不显示错误
-            return;
-          }
-          ElementPlus.ElMessage.error(result.error || '设置模型路径失败');
-        }
-      } catch (error) {
-        console.error('设置模型路径失败:', error);
-        ElementPlus.ElMessage.error('设置模型路径失败');
-      } finally {
-        // 确保加载实例关闭
-        if (loadingInstance) {
-          loadingInstance.close();
-        }
-      }
-    };
-    
-    // 打开模型文件夹
-    const openModelsFolder = async () => {
-      if (!modelsPath.value) {
-        ElementPlus.ElMessage.warning('请先设置模型目录');
-        return;
-      }
-      
-      try {
-        await window.electron.ipcRenderer.invoke('open-directory', modelsPath.value);
-      } catch (error) {
-        console.error('打开模型目录失败:', error);
-        ElementPlus.ElMessage.error('打开模型目录失败');
-      }
-    };
-    
-    // 选择Python路径
-    const selectPythonPath = async () => {
-      let loadingInstance = null;
-      try {
-        // 显示加载中
-        loadingInstance = ElementPlus.ElLoading.service({
-          lock: true,
-          text: '验证Python路径中...',
-          background: 'rgba(0, 0, 0, 0.7)'
-        });
-        
-        console.log('开始选择Python路径...');
-        const result = await window.electron.pythonEnv.selectPythonPath();
-        console.log('选择Python路径结果:', result);
-        
-        if (result && result.success) {
-          pythonPath.value = result.path;
-          await validatePythonPath();
-        } else if (result && !result.success) {
-          if (result.canceled) {
-            // 用户取消了选择，不显示错误
-            return;
-          }
-          pythonPathValid.value = false;
-          pythonPathError.value = result.error || '路径无效';
-          pythonPathWarning.value = false;
-          ElementPlus.ElMessage.error(result.error || '路径无效');
-        }
-      } catch (error) {
-        console.error('设置Python路径失败:', error);
-        ElementPlus.ElMessage.error('设置Python路径失败: ' + error.message);
-      } finally {
-        // 确保加载实例关闭
-        if (loadingInstance) {
-          loadingInstance.close();
-        }
-      }
-    };
-    
-    // 验证Python路径
-    const validatePythonPath = async () => {
-      if (!pythonPath.value) {
-        pythonPathValid.value = false;
-        pythonPathError.value = '路径不能为空';
-        pythonPathWarning.value = false;
-        return;
-      }
-      
-      let loadingInstance = null;
-      try {
-        // 显示加载中
-        loadingInstance = ElementPlus.ElLoading.service({
-          lock: true,
-          text: '验证Python路径中...',
-          background: 'rgba(0, 0, 0, 0.7)'
-        });
-        
-        console.log('开始验证Python路径:', pythonPath.value);
-        const result = await window.electron.pythonEnv.checkPythonVersion(pythonPath.value);
-        console.log('验证Python路径结果:', result);
-        
-        pythonPathValid.value = result.success;
-        
-        if (result.success) {
-          pythonPathError.value = '';
-          pythonPathWarning.value = false;
-          ElementPlus.ElMessage.success(`检测到Python ${result.version}`);
-        } else {
-          pythonPathError.value = result.error || '路径无效';
-          pythonPathWarning.value = false;
-        }
-      } catch (error) {
-        console.error('验证Python路径失败:', error);
-        pythonPathValid.value = false;
-        pythonPathError.value = '验证失败: ' + error.message;
-        pythonPathWarning.value = false;
       } finally {
         // 确保加载实例关闭
         if (loadingInstance) {
@@ -628,11 +450,6 @@ window.Settings = {
       sdPath,
       sdPathValid,
       sdPathError,
-      modelsPath,
-      pythonPath,
-      pythonPathValid,
-      pythonPathError,
-      pythonPathWarning,
       uiSettings,
       systemInfo,
       configBackups,
@@ -641,9 +458,6 @@ window.Settings = {
       deleteBackup,
       formatTimestamp,
       selectSdPath,
-      selectModelsPath,
-      openModelsFolder,
-      selectPythonPath,
       saveUiSettings
     };
   }
